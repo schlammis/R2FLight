@@ -7,18 +7,19 @@ class SampleData:
         self.data  = np.array(data)
         self.fsig  = fsig
         self.fsamp = fsamp
-        self.f0 = self.fsig/self.fsamp
         self.Nhars = Nhars
 
-    def setfmin(self,fmin):
+    def setfmin(self,fmin,fline):
         self.fmin = fmin
+        self.fline = fline
 
     def findf(self):
-        self.fmin = R2FLightAux.get_f(self.data,self.f0)
-        return self.fmin
-        
+        self.fmin, self.fline = R2FLightAux.get_f(self.data,self.fsamp,self.fsig,Nhars=self.Nhars)
+        return self.fmin, self.fline
+
     def fit(self):
-        self.Vc, self.fv,self.c2 = R2FLightAux.fit_sine_cplx(self.data,self.fmin,self.Nhars)
+        self.Vc, self.fv,self.c2,self.rss = R2FLightAux.fit_sine_cplx(
+            self.data,self.fsamp,self.fmin,self.fline,Nhars=self.Nhars)
 
 
 class FourChannels:
@@ -36,9 +37,9 @@ class FourChannels:
         self.Data.append(SampleData(fsig,fsamp,ch2,Nhars))
         self.Data.append(SampleData(fsig,fsamp,ch3,Nhars))
         self.Data.append(SampleData(fsig,fsamp,ch4,Nhars))
-        fmin = self.Data[0].findf()
+        fmin, fline = self.Data[0].findf()
         for i in range(4):
-            self.Data[i].setfmin(fmin)
+            self.Data[i].setfmin(fmin,fline)
             self.Data[i].fit()
 
 @dataclass

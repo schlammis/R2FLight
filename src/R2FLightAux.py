@@ -1,92 +1,205 @@
 import numpy as np
+import scipy.optimize
 from dataclasses import dataclass
 
-"""
-$\hat{\chi}^2 = a +bx +cx^2$
-Minimum:
-$ x =-\frac{b}{2c}$ has the value $a-\frac{b^2}{2c} + \frac{b^2}{4c} = a-\frac{b^2}{4c}$
-At the Minimum the $\chi^2$ should be the $NDF=N-3$. So,
-$\chi^2 =\frac{\hat{\chi}^2}{\sigma^2}=N-3$. Hence, $\sigma^2 = \frac{\hat{\chi}^2}{N-3}$
-The uncertainty in the parameter is  when the unscaled $\chi^2$ goes up by 1. That means the scaled one goes up by $\sigma^2$
-$cx^2 = \sigma^2$ => $x=\sigma/c$
-"""
 
-def fit_sine(y,rf):
+def fit_sine_cplx(y, fsamp, fsig, fline=60, Nhars=1, use_hann=True, chunk_periods=0, cache=None):
     """
-    rf = relative frequency = f0/fs.
-    sin(w t)= sin (2*pi*f0 *i/fs)= sin(2*pi*i *f0/fs)
-    A sin(wt + phi) = A*sin(wt)*cos(phi)+A*cos(wt)*sin(phi)=S*sin(wt)+C*cos(w) => C/S=A*sin(phi)/A*cos(phi)=tan(phi) => phi=atan(C/S)
+    Fits a sine wave with a DC offset to the data.
 
-    If we write
-    y  = Re( A*Exp(i (wt +phi)) = Re( (A* cos( w+ phi) + A*i*sin(w + phi))
-    Re(A)* cos(wt + phi) - Im(A)* sin(w*t+phi)
-    Re => cos_coeff
-    Im => -sin_coeff
+    When chunk_periods > 0, uses two-stage fitting:
+      1. Global Hanning-windowed fit removes DC, line harmonics, and f/2 DDS spur.
+      2. The signal-only residual is split into chunk_periods-long windows; each chunk
+         gets its own [DC, cos, sin, cos/2, sin/2] fit. The array of per-chunk complex
+         amplitudes is returned as a 5th element so that eta ratios can be computed
+         per chunk before averaging (avoiding amplitude-averaging bias).
 
+    When cache= is supplied (from build_fit_cache), the design-matrix construction and
+    inversion are skipped; each call reduces to a matrix–vector multiply.
+
+    Returns:
+        4-tuple (complex_amp, fit_vals, errv, rss)                   when chunk_periods == 0
+        5-tuple (complex_amp, fit_vals, errv, rss, chunk_amps)       when chunking succeeds
     """
-    i = np.arange(len(y))
-    wt= 2*np.pi*i*rf
-    O = np.ones(len(y))
-    C = np.cos(wt)
-    S = np.sin(wt)
-    X = np.vstack((O,C,S)).T
-    fit_pars = np.linalg.solve(X.T @ X, X.T @ y)
-    fit_vals = X @ fit_pars
-    C2 = np.dot(y-fit_vals,y-fit_vals)
-    return fit_pars[1],fit_pars[2],fit_vals,C2
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    n_chunk_params = 5  # DC, cos(wt), sin(wt), cos(wt/2), sin(wt/2)
 
-def fit_sine_cplx(y,rf,useHann=True):
-    """
-    rf = relative frequency = f0/fs.
-    sin(w t)= sin (2*pi*f0 *i/fs)= sin(2*pi*i *f0/fs)
-    A sin(wt + phi) = A*sin(wt)*cos(phi)+A*cos(wt)*sin(phi)=S*sin(wt)+C*cos(w) => C/S=A*sin(phi)/A*cos(phi)=tan(phi) => phi=atan(C/S)
-
-    If we write
-    y  = Re( A*Exp(i (wt +phi)) = Re( (A* cos( w+ phi) + A*i*sin(w + phi))
-    Re(A)* cos(wt + phi) - Im(A)* sin(w*t+phi)
-    Re => cos_coeff
-    Im => -sin_coeff
-
-    """
-    i = np.arange(len(y))
-    wt= 2*np.pi*i*rf
-    O = np.ones(len(y))
-    C = np.cos(wt)
-    S = np.sin(wt)
-    X = np.vstack((O,C,S)).T
-    if useHann:
-        #W_vec = np.blackman(len(y))
-        W_vec = np.hanning(len(y))
-        yw = y * W_vec
-        Ow = O * W_vec
-        Cw = C * W_vec
-        Sw = S * W_vec
-        Xw = np.vstack((Ow,Cw,Sw)).T
-        fit_pars = np.linalg.solve(Xw.T @ Xw, Xw.T @ yw)
+    if cache is not None:
+        X, w, bg_pinv, rf = cache['X'], cache['w'], cache['bg_pinv'], cache['rf']
+        fit_pars   = bg_pinv @ (y * w)
+        use_chunks = 'chunk_pinvs' in cache
     else:
-        fit_pars = np.linalg.solve(X.T @ X, X.T @ y)
-    fit_vals = X @ fit_pars
-    C2 = np.dot(y-fit_vals,y-fit_vals)
-    NDF = len(y)-3
-    errv = np.sqrt(C2/NDF)
-    return fit_pars[1]-1j*fit_pars[2],fit_vals,errv
+        rf  = fsig  / fsamp
+        rlf = fline / fsamp
+        wt  = 2 * np.pi * np.arange(n) * rf
+        wlf = 2 * np.pi * np.arange(n) * rlf
+        cols = [np.ones(n), np.cos(wt), np.sin(wt),
+                np.cos(wt / 2), np.sin(wt / 2),
+                np.cos(wlf), np.sin(wlf), np.cos(2*wlf), np.sin(2*wlf)]
+        for h in range(2, Nhars + 1):
+            cols.extend([np.cos(h * wt), np.sin(h * wt)])
+        # If any line harmonic falls within fline/2 of fsig, add it explicitly so it
+        # doesn't leak into the signal estimate (e.g. 42×60=2520 Hz near 2512 Hz).
+        n_extra_line = 0
+        n_nearest = int(round(fsig / fline))
+        for nh in range(max(3, n_nearest - 2), n_nearest + 3):
+            fn = nh * fline
+            if fsamp / n < abs(fn - fsig) < fline / 2:
+                wnh = 2 * np.pi * np.arange(n) * fn / fsamp
+                cols.extend([np.cos(wnh), np.sin(wnh)])
+                n_extra_line += 2
+        X = np.column_stack(cols)
+        w = np.hanning(n) if use_hann else np.ones(n)
+        X_eff = X * w[:, np.newaxis]
+        y_eff = y * w
+        fit_pars, lstsq_res, _, _ = np.linalg.lstsq(X_eff, y_eff, rcond=None)
+        chunk_size = int(round(chunk_periods * fsamp / fsig)) if chunk_periods > 0 else 0
+        use_chunks = chunk_size > n_chunk_params + 1 and n // chunk_size >= 2
 
-def get_f(y,rf):
-    """
-    y = a+b*f+cf^2 => min b +2*c*f=0 => f= -b/(2c)
-    """
-    N = len(y)
-    _,_,_,C20 = fit_sine(y,rf)
-    _,_,_,C2m = fit_sine(y,rf*N/(N+1))
-    _,_,_,C2p = fit_sine(y,rf*N/(N-1))
-    ff = [rf*N/(N+1),rf,rf*N/(N-1)]
-    yy = [C2m,C20,C2p]
-    pf = np.polyfit(ff,yy,2)
-    minf = -pf[1]/2/pf[0]
-    if minf>rf*N/(N+1) and minf<rf*N/(N-1):
-        return minf
+    fit_vals = X @ fit_pars
+    rss  = float(np.sum((w * (y - fit_vals)) ** 2))
+    ndf  = n - X.shape[1]
+    errv = np.sqrt(rss / ndf) if ndf > 0 else 0.0
+
+    if not use_chunks:
+        return fit_pars[1] - 1j * fit_pars[2], fit_vals, errv, rss
+
+    # Stage 1: remove background (DC, line harmonics, f/2) leaving signal only
+    bg_pars    = fit_pars.copy()
+    bg_pars[1] = 0.0
+    bg_pars[2] = 0.0
+    y_bg  = X @ bg_pars
+    y_sig = y - y_bg
+
+    # Stage 2: per-chunk amplitudes
+    if cache is not None:
+        n_chunks    = cache['n_chunks']
+        chunk_size  = cache['chunk_size']
+        chunk_pinvs = cache['chunk_pinvs']
     else:
-        return get_f(y,minf)
+        n_chunks    = n // chunk_size
+        chunk_pinvs = None
+
+    chunk_amps = np.zeros(n_chunks, dtype=complex)
+    fit_sig    = np.zeros(n, dtype=float)
+    rss_total  = 0.0
+    ndf_total  = 0
+
+    for k in range(n_chunks):
+        i0 = k * chunk_size
+        i1 = i0 + chunk_size
+        yc = y_sig[i0:i1]
+        if chunk_pinvs is not None:
+            pinv_c, wc, Xc = chunk_pinvs[k]
+            pars_c = pinv_c @ (yc * wc)
+        else:
+            idx = np.arange(i0, i1)
+            wtc = 2 * np.pi * idx * rf
+            Xc  = np.column_stack([np.ones(chunk_size),
+                                    np.cos(wtc), np.sin(wtc),
+                                    np.cos(wtc / 2), np.sin(wtc / 2)])
+            wc = np.hanning(chunk_size) if use_hann else np.ones(chunk_size)
+            pars_c, _, _, _ = np.linalg.lstsq(Xc * wc[:, np.newaxis], yc * wc, rcond=None)
+        chunk_amps[k] = pars_c[1] - 1j * pars_c[2]
+        fit_sig[i0:i1] = Xc @ pars_c
+        rss_total += float(np.sum((yc - Xc @ pars_c) ** 2))
+        ndf_total += chunk_size - n_chunk_params
+
+    # Tail samples not covered by whole chunks: use global fundamental
+    tail = n_chunks * chunk_size
+    if tail < n:
+        tail_idx = np.arange(tail, n)
+        fit_sig[tail:] = (fit_pars[1] * np.cos(2 * np.pi * tail_idx * rf) +
+                          fit_pars[2] * np.sin(2 * np.pi * tail_idx * rf))
+
+    complex_amp = np.mean(chunk_amps)
+    fit_vals    = y_bg + fit_sig
+    errv        = np.sqrt(rss_total / ndf_total) if ndf_total > 0 else 0.0
+    return complex_amp, fit_vals, errv, rss_total, chunk_amps
+
+
+def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1):
+    """
+    Estimates the signal frequency by minimizing the residual sum of squares
+    from fit_sine_cplx using Brent's bounded method (guaranteed convergence).
+    chunk_periods is intentionally left at 0 here for speed.
+    """
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+
+    fsig_min = fsig_guess * n / (n + 1)
+    fsig_max = fsig_guess * n / (n - 1)
+
+    res_sig = scipy.optimize.minimize_scalar(
+        lambda fsig: fit_sine_cplx(y, fsamp, fsig, fline_guess, Nhars=Nhars, use_hann=use_hann)[3],
+        bounds=(fsig_min, fsig_max),
+        method='bounded',
+    )
+    best_fsig = res_sig.x
+
+    res_line = scipy.optimize.minimize_scalar(
+        lambda fline: fit_sine_cplx(y, fsamp, best_fsig, fline, Nhars=Nhars, use_hann=use_hann)[3],
+        bounds=(fline_guess - 0.5, fline_guess + 0.5),
+        method='bounded',
+    )
+    return best_fsig, res_line.x
+
+
+def build_fit_cache(fsamp, fsig, fline, n, Nhars, use_hann=True, chunk_periods=0):
+    """Precompute fit matrices for repeated calls at the same frequency and sample count.
+
+    Builds the full design matrix X, the Hanning window w, and the pseudoinverse
+    pinv(X * w[:, None]).  When chunk_periods > 0, also precomputes the per-chunk
+    pseudoinverses so Stage-2 fits reduce to matrix–vector multiplies.
+
+    Pass the returned dict as cache= to fit_sine_cplx.
+    """
+    rf  = fsig  / fsamp
+    rlf = fline / fsamp
+    wt  = 2 * np.pi * np.arange(n) * rf
+    wlf = 2 * np.pi * np.arange(n) * rlf
+
+    cols = [np.ones(n), np.cos(wt), np.sin(wt),
+            np.cos(wt / 2), np.sin(wt / 2),
+            np.cos(wlf), np.sin(wlf), np.cos(2*wlf), np.sin(2*wlf)]
+    for h in range(2, Nhars + 1):
+        cols.extend([np.cos(h * wt), np.sin(h * wt)])
+
+    n_nearest = int(round(fsig / fline))
+    for nh in range(max(3, n_nearest - 2), n_nearest + 3):
+        fn = nh * fline
+        if fsamp / n < abs(fn - fsig) < fline / 2:
+            wnh = 2 * np.pi * np.arange(n) * fn / fsamp
+            cols.extend([np.cos(wnh), np.sin(wnh)])
+
+    X = np.column_stack(cols)
+    w = np.hanning(n) if use_hann else np.ones(n)
+    bg_pinv = np.linalg.pinv(X * w[:, np.newaxis])
+
+    cache = {'X': X, 'w': w, 'bg_pinv': bg_pinv, 'rf': rf}
+
+    n_chunk_params = 5
+    chunk_size = int(round(chunk_periods * fsamp / fsig)) if chunk_periods > 0 else 0
+    if chunk_size > n_chunk_params + 1 and n // chunk_size >= 2:
+        n_chunks    = n // chunk_size
+        chunk_pinvs = []
+        for k in range(n_chunks):
+            i0  = k * chunk_size
+            i1  = i0 + chunk_size
+            idx = np.arange(i0, i1)
+            wtc = 2 * np.pi * idx * rf
+            Xc  = np.column_stack([np.ones(chunk_size),
+                                    np.cos(wtc), np.sin(wtc),
+                                    np.cos(wtc / 2), np.sin(wtc / 2)])
+            wc = np.hanning(chunk_size) if use_hann else np.ones(chunk_size)
+            chunk_pinvs.append((np.linalg.pinv(Xc * wc[:, np.newaxis]), wc, Xc))
+        cache['chunk_pinvs'] = chunk_pinvs
+        cache['chunk_size']  = chunk_size
+        cache['n_chunks']    = n_chunks
+
+    return cache
+
 
 @dataclass
 class ComplexEllipse:
