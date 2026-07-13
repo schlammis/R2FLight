@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
 
         self.cfg = R2FConfig.CFG()
 
-        dummy_config = CustomData.NPointsConfig(1000, 800000)
+        dummy_config = CustomData.NPointsConfig(1000, 800000, Nhars=self.cfg.getintkey('NHARS'))
         self.rData   = CustomData.NPoints(dummy_config)
         self.rSet    = CustomData.FourChannels(1000, 800000, 2, [], [], [], [], 0, 0, 0, ts=-1)
         self.allData = CustomData.DAQBuffer(1000, cols=6)

@@ -4,7 +4,8 @@ import os
 class CFG:
     k1= 'STD'
     std = { 'TZAGAIN': 4,
-            'SAMPCOUNT': 300000}
+            'SAMPCOUNT': 300000,
+            'NHARS': 9}
 
     def __init__(self):
         self.fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R2FLight.ini')

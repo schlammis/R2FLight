@@ -24,7 +24,6 @@ class Meas(QObject):
         self.isidle =True
         self.mutex       = mutex
         self.co=-1
-        self.Nhars=2
         self.runt = time.time()
         self.fsig = 1000
         self.fsamp = 800000 
@@ -137,8 +136,9 @@ class Meas(QObject):
             g1=self.g1,
             g2=self.g2,
             N=self.Npts,
+            Nhars=self.par.cfg.getintkey('NHARS'),
             modulation=self.modulation
-        )        
+        )
         self._stop_requested = False
         self._daq_armed = False
         self.rawN = CustomData.NPoints(my_config)
