@@ -7,7 +7,7 @@ pyqtSlot)
 import time
 import numpy as np 
 import pyvisa
-import R2FMath
+import R2FLightAux
 import CustomData
 import re
 

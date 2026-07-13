@@ -1,4 +1,4 @@
-import R2FMath
+import R2FLightAux
 import numpy as np
 from dataclasses import dataclass
 
@@ -14,11 +14,11 @@ class SampleData:
         self.fmin = fmin
 
     def findf(self):
-        self.fmin = R2FMath.get_f(self.data,self.f0)
+        self.fmin = R2FLightAux.get_f(self.data,self.f0)
         return self.fmin
         
     def fit(self):
-        self.Vc, self.fv,self.c2 = R2FMath.fit_sine_cplx(self.data,self.fmin,self.Nhars)
+        self.Vc, self.fv,self.c2 = R2FLightAux.fit_sine_cplx(self.data,self.fmin,self.Nhars)
 
 
 class FourChannels:
@@ -114,11 +114,11 @@ class NPoints:
             if i==3 and not self.cfg.fit4:
                 break
             if i!=0:
-                self.RawElli[i] = R2FMath.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
-        self.EtaElli[0] = R2FMath.ComplexEllipse.fit_from_cmplx_points(self.eta2)
-        self.EtaElli[1] = R2FMath.ComplexEllipse.fit_from_cmplx_points(self.eta3)
+                self.RawElli[i] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
+        self.EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta2)
+        self.EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta3)
         if self.cfg.fit4:
-            self.EtaElli[2] = R2FMath.ComplexEllipse.fit_from_cmplx_points(self.eta4)
+            self.EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta4)
         gain1_re = self.EtaElli[0].semi_major / self.EtaElli[1].semi_major
         gain1_im = self.EtaElli[0].semi_minor / self.EtaElli[1].semi_minor
         self.Res['mgain1']  = 0.5*(gain1_re + gain1_im)
