@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QHBoxLayout,
+    QFormLayout,
     QGridLayout,
     QWidget,
     QTabWidget,
@@ -39,6 +40,7 @@ from PyQt5.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QTextEdit,
+    QLineEdit,
 )
 
 
@@ -119,6 +121,8 @@ class MainWindow(QMainWindow):
         self.output = QTextEdit(self)
         self.output.resize(540, 200)
         self.output.setReadOnly(True)
+
+        self.cfgWidget, self.cfgFields = self._build_config_widget()
 
         # --- menu bar ---
         file_menu = self.menuBar().addMenu('File')
@@ -217,6 +221,36 @@ class MainWindow(QMainWindow):
 
     def _update_freq_label(self):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
+
+    def _build_config_widget(self):
+        """Builds an editable form for the keys in R2FLight.ini."""
+        widget = QWidget()
+        form = QFormLayout()
+        fields = {}
+        for key in sorted(R2FConfig.CFG.std):
+            edit = QLineEdit(str(self.cfg.getintkey(key)))
+            form.addRow(key, edit)
+            fields[key] = edit
+        save_btn = QPushButton('Save')
+        save_btn.clicked.connect(self._save_config)
+        form.addRow(save_btn)
+        widget.setLayout(form)
+        return widget, fields
+
+    def _refresh_config_fields(self):
+        for key, edit in self.cfgFields.items():
+            edit.setText(str(self.cfg.getintkey(key)))
+
+    def _save_config(self):
+        for key, edit in self.cfgFields.items():
+            try:
+                val = int(edit.text())
+            except ValueError:
+                self.myprint(f'Config: "{key}" must be an integer, not saved')
+                continue
+            self.cfg.setintkey(key, val)
+            edit.setText(str(val))
+        self.myprint('Config saved to R2FLight.ini')
 
     # ------------------------------------------------------------------
     # Measurement loop
@@ -501,6 +535,8 @@ class MainWindow(QMainWindow):
             self.plotresults()
         elif tat == 'msg':
             self.showOutput()
+        elif tat == 'config':
+            self._refresh_config_fields()
 
     # ------------------------------------------------------------------
     # Logging
@@ -526,10 +562,11 @@ class MyTabWidget(QWidget):
         self.master = QTabWidget()
         self.master.resize(300, 200)
 
-        tablabels = ['raw', 'scatter', 'results', 'msg']
+        tablabels = ['raw', 'scatter', 'results', 'msg', 'config']
         self.mytabs = [QWidget() for _ in tablabels]
         for tab, label in zip(self.mytabs, tablabels):
             self.master.addTab(tab, label)
+        tabs_by_label = dict(zip(tablabels, self.mytabs))
 
         # raw / scatter / results tabs
         plot_groups = [parent.rawplots, parent.scatterplots, parent.resultplots]
@@ -541,8 +578,12 @@ class MyTabWidget(QWidget):
                     glayout.addWidget(plots[i, j], i, j)
 
         msg_layout = QGridLayout()
-        self.mytabs[-1].setLayout(msg_layout)
+        tabs_by_label['msg'].setLayout(msg_layout)
         msg_layout.addWidget(parent.output, 0, 0)
+
+        config_layout = QGridLayout()
+        tabs_by_label['config'].setLayout(config_layout)
+        config_layout.addWidget(parent.cfgWidget, 0, 0)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.master)

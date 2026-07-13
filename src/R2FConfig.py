@@ -3,10 +3,11 @@ import os
 
 class CFG:
     k1= 'STD'
-    std = { 'TZAGAIN': 4}
+    std = { 'TZAGAIN': 4,
+            'SAMPCOUNT': 300000}
 
     def __init__(self):
-        self.fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R2F.ini')
+        self.fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R2FLight.ini')
         self.cp = cp.ConfigParser()
         self.cp.read(self.fname)
     
