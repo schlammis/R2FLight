@@ -1,4 +1,4 @@
-import os,sys,pathlib
+import os,sys
 import traceback
 import ctypes
 import datetime
@@ -6,24 +6,18 @@ import time
 
 import mplwidget
 import numpy as np
-#sys.path.append(r'c:\python\CeramicCap3\src')
-import R2FMath
-import serial
-import serial.tools.list_ports
 import spectral3
 from Meas3 import Meas
 import CustomData
 import R2FConfig
 from TZA import TZA
-import scipy.optimize
 import mystat
 
 from PyQt5.QtCore import (
     QMutex,
     QThread,
     QTimer,
-    pyqtSignal,
-    pyqtSlot)
+    pyqtSignal)
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -208,8 +202,6 @@ class MainWindow(QMainWindow):
         sb_widget = QWidget()
         sb_layout = QHBoxLayout(sb_widget)
         sb_layout.setContentsMargins(0, 0, 0, 0)
-        self.sblabel = QLabel("")
-        sb_layout.addWidget(self.sblabel)
         sb_layout.addWidget(self.progressBar)
 
         self.statusBar = QStatusBar()
@@ -306,14 +298,9 @@ class MainWindow(QMainWindow):
                 return
             self.mydvm.moveToThread(self.thread)
 
-            self.V1 = 5.9
-            self.V2 = 5.9j
-            self.dV = 0.01
-            self.g1 = 1
-            self.g2 = 1
+            V1, V2, dV, g1, g2 = 5.9, 5.9j, 0.01, 1, 1
             modulation = not self.cbModOff.isChecked()
-            self.mydvm.storeV(self.V1, self.V2, self.dV, self.fsig, self.g1, self.g2,
-                              modulation=modulation)
+            self.mydvm.storeV(V1, V2, dV, self.fsig, g1, g2, modulation=modulation)
 
             self.mydvm.dataReady.connect(self.onNewData)
             self.mydvm.dataSetReady.connect(self.onNewSet)
@@ -383,12 +370,22 @@ class MainWindow(QMainWindow):
     # Plotting
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _clear_grid(plots):
+        for i in range(2):
+            for j in range(2):
+                plots[i, j].canvas.ax1.cla()
+
+    @staticmethod
+    def _draw_grid(plots):
+        for i in range(2):
+            for j in range(2):
+                plots[i, j].canvas.draw()
+
     def plotraw(self):
         if self.rSet.ts <= 0:
             return
-        for i in range(2):
-            for j in range(2):
-                self.rawplots[i, j].canvas.ax1.cla()
+        self._clear_grid(self.rawplots)
 
         self.t = np.arange(len(self.rSet.Data[0].data))
         Vc  = self.rSet.Data[0].Vc
@@ -416,14 +413,10 @@ class MainWindow(QMainWindow):
         self.rawplots[1, 1].canvas.ax1.set_xscale('log')
         self.rawplots[1, 1].canvas.ax1.set_yscale('log')
 
-        for i in range(2):
-            for j in range(2):
-                self.rawplots[i, j].canvas.draw()
+        self._draw_grid(self.rawplots)
 
     def plotscatter(self):
-        for i in range(2):
-            for j in range(2):
-                self.scatterplots[i, j].canvas.ax1.cla()
+        self._clear_grid(self.scatterplots)
 
         # completed ellipse points — only if we have a result
         if self.rData.Res['ts'] > 0:
@@ -455,9 +448,7 @@ class MainWindow(QMainWindow):
             self.scatterplots[1, 0].canvas.ax1.plot(np.real(pv2), np.imag(pv2), 'r+', markersize=8)
             self.scatterplots[1, 1].canvas.ax1.plot(np.real(pv3), np.imag(pv3), 'b+', markersize=8)
 
-        for i in range(2):
-            for j in range(2):
-                self.scatterplots[i, j].canvas.draw()
+        self._draw_grid(self.scatterplots)
 
     def plotresults(self):
         if self.rData.Res['ts'] <= 0:
@@ -469,9 +460,7 @@ class MainWindow(QMainWindow):
         resist = data[:, 4]
         scale  = np.mean(resist)
 
-        for i in range(2):
-            for j in range(2):
-                self.resultplots[i, j].canvas.ax1.cla()
+        self._clear_grid(self.resultplots)
 
         self.resultplots[0, 0].canvas.ax1.plot(t, f,      'ko')
         self.resultplots[0, 0].canvas.ax1.set_ylabel('f / Hz')
@@ -495,9 +484,7 @@ class MainWindow(QMainWindow):
             self.resultplots[0, 1].canvas.ax1.set_xlabel('time / s')
             self.resultplots[0, 1].canvas.ax1.set_ylabel('rel. Allan dev. / ppm')
 
-        for i in range(2):
-            for j in range(2):
-                self.resultplots[i, j].canvas.draw()
+        self._draw_grid(self.resultplots)
 
     def showOutput(self):
         self.output.setText('\n'.join(self.mytext))

@@ -1,9 +1,8 @@
 
 from PyQt5.QtCore import (
-QObject, 
+QObject,
 pyqtSignal,
-pyqtSlot,
-QTimer)
+pyqtSlot)
 
 import time
 import numpy as np 
@@ -57,10 +56,8 @@ class Meas(QObject):
         self.sg1.write('OUTP2 ON')
         self.dvm.timeout=25000
         self.dvm.write('FORM3 REAL')
-        #self.dvm.write('ACQ3:VOLT 3,(@101:104)')
         self.dvm.write('ACQ3:VOLT 3,DIFF,AC,TIME,(@101:102)')
         self.dvm.write('ACQ3:VOLT 0.3,DIFF,AC,TIME,(@103:104)')
-        #self.dvm.write('ACQ3:VOLT 1,(@101)')
         self.dvm.write('SAMP3:RATE {0:8.2f},(@101:104)'.format(self.fsamp))
         self.dvm.write('SAMP3:COUN {0},(@101:104)'.format(300000))
         self.dvm.write('INP3:COUP AC,(@101:104)')
@@ -102,14 +99,6 @@ class Meas(QObject):
         self.V1 = self.V1c
         V1amp   = np.abs(self.V1)
         V2amp   = np.abs(self.V2)
-#        if V1amp>=10.0:
-#            print('Error V1>10 V -- rescaling')
-#            self.V1 = 9/np.abs(self.V1)*self.V1
-#            V1amp   = np.abs(self.V1)
-#        elif V2amp>10.0:
-#            print('Error V2>10 V -- rescaling')
-#            self.V2 = 9.9/np.abs(self.V2)*self.V2
-#            V2amp   = np.abs(self.V2)
         V1phase = np.angle(self.V1)/np.pi*180
         V2phase = np.angle(self.V2)/np.pi*180
         self.write1dbg('SOUR1:VOLT {0:8.4f}'.format(V1amp))
@@ -119,7 +108,6 @@ class Meas(QObject):
         self.write1dbg('PHAS:SYNC')
         self.write1dbg('SOUR1:PHASE {0:8.4f}'.format(V1phase))
         self.write1dbg('SOUR2:PHASE {0:8.4f}'.format(V2phase))
-        #self.par.myprint(f"cmd: Amp:{V1amp:.3f} Phase:{V1phase:.3f}")
         V1=float(self.sg1.query('SOUR1:VOLT?'))
         V2=float(self.sg1.query('SOUR2:VOLT?'))
         phase1=float(self.sg1.query('SOUR1:PHASE?'))
@@ -184,16 +172,6 @@ class Meas(QObject):
             except Exception:
                 pass
 
-
-    def readCh(self,ch):
-        """ ch = 1,2,3,4 """
-        if ch not in (1,2,3,4):
-            print('Channel not valid, you sent: {0}'.format(ch))
-        ostr ='FETCH3? (@10{0})'.format(ch)
-        values = self.dvm.query_binary_values(ostr, \
-                datatype='f', is_big_endian=True)
-        return values  
-      
     def getvals(self):
         if self.co%2==0:
             ch1=self.dvm.query_binary_values('FETCH3? (@101)',  datatype='f', is_big_endian=True)
