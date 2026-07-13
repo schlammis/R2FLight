@@ -149,6 +149,8 @@ class MainWindow(QMainWindow):
         self.cbAutoFreq.setChecked(True)
         self.cbModOff = QCheckBox("modulation off")
         self.cbModOff.setChecked(False)
+        self.cbResidualPSA = QCheckBox("plot residual PSA")
+        self.cbResidualPSA.setChecked(False)
 
         self.buPause = QPushButton("Pause")
         self.buPause.setCheckable(True)
@@ -160,6 +162,7 @@ class MainWindow(QMainWindow):
         vlayout.addWidget(self.fstep)
         vlayout.addWidget(self.cbAutoFreq)
         vlayout.addWidget(self.cbModOff)
+        vlayout.addWidget(self.cbResidualPSA)
         vlayout.addWidget(QLabel('current f:'))
         self.laf = QLabel()
         self._update_freq_label()
@@ -218,6 +221,7 @@ class MainWindow(QMainWindow):
         self.buPause.toggled.connect(self._on_pause_toggled)
         self.bufp.clicked.connect(self.fp)
         self.bufm.clicked.connect(self.fm)
+        self.cbResidualPSA.toggled.connect(self.plotraw)
 
     def _update_freq_label(self):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
@@ -431,9 +435,20 @@ class MainWindow(QMainWindow):
         be  = be1
         en  = int(self.rSet.fsamp / self.rSet.fsig * 2) + be1
 
-        psa1, f1 = spectral3.mypsa(self.rSet.Data[0].data, 1 / self.rSet.fsamp)
-        psa2, f2 = spectral3.mypsa(self.rSet.Data[1].data, 1 / self.rSet.fsamp)
-        psa3, f3 = spectral3.mypsa(self.rSet.Data[2].data, 1 / self.rSet.fsamp)
+        if self.cbResidualPSA.isChecked():
+            src0 = self.rSet.Data[0].data - self.rSet.Data[0].fv
+            src1 = self.rSet.Data[1].data - self.rSet.Data[1].fv
+            src2 = self.rSet.Data[2].data - self.rSet.Data[2].fv
+            psa_title = 'residual PSA (sine removed)'
+        else:
+            src0 = self.rSet.Data[0].data
+            src1 = self.rSet.Data[1].data
+            src2 = self.rSet.Data[2].data
+            psa_title = 'PSA'
+
+        psa1, f1 = spectral3.mypsa(src0, 1 / self.rSet.fsamp)
+        psa2, f2 = spectral3.mypsa(src1, 1 / self.rSet.fsamp)
+        psa3, f3 = spectral3.mypsa(src2, 1 / self.rSet.fsamp)
 
         self.rawplots[0, 0].canvas.ax1.plot(self.t[be:en], self.rSet.Data[0].data[be:en], 'r.')
         self.rawplots[0, 1].canvas.ax1.plot(self.t[be:en], self.rSet.Data[1].data[be:en], 'g.')
@@ -446,6 +461,7 @@ class MainWindow(QMainWindow):
         self.rawplots[1, 0].canvas.ax1.plot(self.t[be:en], self.rSet.Data[2].fv[be:en], 'k-')
         self.rawplots[1, 1].canvas.ax1.set_xscale('log')
         self.rawplots[1, 1].canvas.ax1.set_yscale('log')
+        self.rawplots[1, 1].canvas.ax1.set_title(psa_title)
 
         self._draw_grid(self.rawplots)
 
