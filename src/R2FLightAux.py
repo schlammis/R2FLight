@@ -128,8 +128,14 @@ def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1):
     y = np.asarray(y, dtype=float)
     n = len(y)
 
-    fsig_min = fsig_guess * n / (n + 1)
-    fsig_max = fsig_guess * n / (n - 1)
+    # Search +/- one full FFT bin around the guess. The old +/-fsig/n bracket
+    # (a few mHz wide at typical n) was tighter than the spectral resolution
+    # itself, so Brent's method would pin at the edge whenever the true
+    # frequency drifted from fsig_guess by more than that, leaving an
+    # un-cancelled spike in the residual right at the true frequency.
+    fbin = fsamp / n
+    fsig_min = fsig_guess - fbin
+    fsig_max = fsig_guess + fbin
 
     res_sig = scipy.optimize.minimize_scalar(
         lambda fsig: fit_sine_cplx(y, fsamp, fsig, fline_guess, Nhars=Nhars, use_hann=use_hann)[3],
