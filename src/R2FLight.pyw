@@ -526,6 +526,9 @@ class MainWindow(QMainWindow):
         scrollbar.setValue(scrollbar.maximum())
 
     def replot(self):
+        """Redraws whichever data tab is currently active. Called on every
+        incoming data point — must NOT touch the config tab, or it would
+        overwrite in-progress edits there."""
         tat = self.tabWidget.master.tabText(self.tabWidget.master.currentIndex())
         if tat == 'raw':
             self.plotraw()
@@ -535,8 +538,14 @@ class MainWindow(QMainWindow):
             self.plotresults()
         elif tat == 'msg':
             self.showOutput()
-        elif tat == 'config':
+
+    def _on_tab_changed(self, index):
+        """Called only when the user switches tabs (not on every data point)."""
+        tat = self.tabWidget.master.tabText(index)
+        if tat == 'config':
             self._refresh_config_fields()
+        else:
+            self.replot()
 
     # ------------------------------------------------------------------
     # Logging
@@ -589,7 +598,7 @@ class MyTabWidget(QWidget):
         layout.addWidget(self.master)
         self.setLayout(layout)
 
-        self.master.currentChanged.connect(parent.replot)
+        self.master.currentChanged.connect(parent._on_tab_changed)
 
 
 def excepthook(exc_type, exc_value, exc_tb):
