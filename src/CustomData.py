@@ -126,18 +126,31 @@ class NPoints:
         self.setGoodFlag()
 
     def _fit_eta_ellipses(self,eta2,eta3,eta4):
-        """Fits eta2/eta3/(eta4) ellipses for one switch state and returns
-        (EtaElli, mgain1, mratio1)."""
+        """Fits eta2/eta3/(eta4) ellipses for one switch state, for the
+        scatter-tab display only -- R itself comes from the linear
+        regression in _fit_eta_regression instead."""
         EtaElli = np.zeros(3, dtype=object)
         EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta2)
         EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta3)
         if self.cfg.fit4:
             EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta4)
-        gain1_re = EtaElli[0].semi_major / EtaElli[1].semi_major
-        gain1_im = EtaElli[0].semi_minor / EtaElli[1].semi_minor
-        mgain1  = 0.5*(gain1_re + gain1_im)
-        mratio1 = mgain1*EtaElli[1].eta_o - EtaElli[0].eta_o
-        return EtaElli, mgain1, mratio1
+        return EtaElli
+
+    def _fit_eta_regression(self,eta2,eta3):
+        """Complex linear regression eta2 = mgain1*eta3 + const, returning
+        (mgain1, mratio1). The bridge relation omega*C*R = j*eta2 + j*(R/Z)*eta3
+        makes eta2 a linear function of eta3 with complex slope mgain1 = -(R/Z)
+        regardless of the modulation trajectory's shape, so a direct regression
+        is less restrictive than fitting an ellipse to each and taking an
+        axis-ratio gain."""
+        eta2_mean = np.mean(eta2)
+        eta3_mean = np.mean(eta3)
+        d_eta2 = eta2 - eta2_mean
+        d_eta3 = eta3 - eta3_mean
+        denom = np.sum(np.abs(d_eta3)**2)
+        mgain1  = np.dot(d_eta2, np.conj(d_eta3)) / denom
+        mratio1 = mgain1*eta3_mean - eta2_mean
+        return mgain1, mratio1
 
     def _calc_with_modulation(self):
         self.precalc()
@@ -148,11 +161,15 @@ class NPoints:
             if i!=0:
                 self.RawElli[i] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
 
-        # Fit the eta2/eta3/(eta4) ellipses independently for each switch
-        # state, then average the resulting mratio1 (not the raw points).
-        self.EtaElliA, mgain1A, mratio1A = self._fit_eta_ellipses(self.eta2A,self.eta3A,self.eta4A)
-        self.EtaElliB, mgain1B, mratio1B = self._fit_eta_ellipses(self.eta2B,self.eta3B,self.eta4B)
+        # eta2/eta3 ellipses are still fit per switch state for the scatter-tab
+        # display. R/mratio1 itself now comes from a linear regression of eta2
+        # on eta3 for each switch state, then averaging the two results.
+        self.EtaElliA = self._fit_eta_ellipses(self.eta2A,self.eta3A,self.eta4A)
+        self.EtaElliB = self._fit_eta_ellipses(self.eta2B,self.eta3B,self.eta4B)
         self.EtaElli = self.EtaElliA  # backward-compat alias for existing plotting code
+
+        mgain1A, mratio1A = self._fit_eta_regression(self.eta2A,self.eta3A)
+        mgain1B, mratio1B = self._fit_eta_regression(self.eta2B,self.eta3B)
 
         self.Res['mratio1A'] = mratio1A
         self.Res['mratio1B'] = mratio1B
