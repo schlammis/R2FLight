@@ -473,16 +473,25 @@ class MainWindow(QMainWindow):
         if self.rData.Res['ts'] > 0:
             #self.scatterplots[0, 0].canvas.ax1.plot(np.real(self.rData.ave4[:, 0]), np.imag(self.rData.ave4[:, 0]), 'mo')
             #self.scatterplots[0, 1].canvas.ax1.plot(np.real(self.rData.ave4[:, 2]), np.imag(self.rData.ave4[:, 1]), 'co')
-            self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2),       np.imag(self.rData.eta2),       'ro')
-            self.scatterplots[1, 1].canvas.ax1.plot(np.real(self.rData.eta3),       np.imag(self.rData.eta3),       'bo')
+            # switch state A (solid) and B (triangles) are fit independently,
+            # so show both point sets and both ellipse fits rather than the
+            # switch-averaged view the fit no longer uses.
+            self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2A), np.imag(self.rData.eta2A), 'ro')
+            self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2B), np.imag(self.rData.eta2B), 'y^')
+            self.scatterplots[1, 1].canvas.ax1.plot(np.real(self.rData.eta3A), np.imag(self.rData.eta3A), 'bo')
+            self.scatterplots[1, 1].canvas.ax1.plot(np.real(self.rData.eta3B), np.imag(self.rData.eta3B), 'c^')
             if self.rData.RawElli[1] is not None:
                 self.rData.RawElli[1].plot_elli(self.scatterplots[0, 0].canvas.ax1, ellipse_color='m')
             if self.rData.RawElli[2] is not None:
                 self.rData.RawElli[2].plot_elli(self.scatterplots[0, 1].canvas.ax1, ellipse_color='c')
-            if self.rData.EtaElli[0] is not None:
-                self.rData.EtaElli[0].plot_elli(self.scatterplots[1, 0].canvas.ax1, ellipse_color='r')
-            if self.rData.EtaElli[1] is not None:
-                self.rData.EtaElli[1].plot_elli(self.scatterplots[1, 1].canvas.ax1, ellipse_color='b')
+            if self.rData.EtaElliA[0] is not None:
+                self.rData.EtaElliA[0].plot_elli(self.scatterplots[1, 0].canvas.ax1, ellipse_color='r')
+            if self.rData.EtaElliB[0] is not None:
+                self.rData.EtaElliB[0].plot_elli(self.scatterplots[1, 0].canvas.ax1, ellipse_color='orange')
+            if self.rData.EtaElliA[1] is not None:
+                self.rData.EtaElliA[1].plot_elli(self.scatterplots[1, 1].canvas.ax1, ellipse_color='b')
+            if self.rData.EtaElliB[1] is not None:
+                self.rData.EtaElliB[1].plot_elli(self.scatterplots[1, 1].canvas.ax1, ellipse_color='c')
             np.savetxt(os.path.join(self.yyyymmdir, 'eta2.dat'),
                        np.vstack((np.real(self.rData.eta2), np.imag(self.rData.eta2))).T)
             np.savetxt(os.path.join(self.yyyymmdir, 'eta3.dat'),

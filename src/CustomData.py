@@ -95,14 +95,28 @@ class NPoints:
             self.ctrl[i,1] =self.Data[i].V2c
         # First half of the points is one full ellipse in switch position A,
         # second half is a full ellipse in switch position B (same angle
-        # sequence in both halves) -- average matching angles across the two.
+        # sequence in both halves).
         half = self.N // 2
-        self.ave4  = 0.5*(self.raw8[:half,:]+self.raw8[half:,:])
-        self.ctrla = 0.5*(self.ctrl[:half,:]+self.ctrl[half:,:])
+        self.raw8A, self.raw8B = self.raw8[:half,:], self.raw8[half:,:]
+        self.ctrlA, self.ctrlB = self.ctrl[:half,:], self.ctrl[half:,:]
 
+        # Switch-averaged view -- kept only for the raw-channel diagnostic
+        # ellipses (RawElli) and the eta*.dat/V2.dat logging, which stay on
+        # the combined view. The eta ellipse fit itself (below) no longer
+        # uses this -- each switch state is fit independently instead.
+        self.ave4  = 0.5*(self.raw8A+self.raw8B)
+        self.ctrla = 0.5*(self.ctrlA+self.ctrlB)
         self.eta2 = self.ave4[:,1]/self.ave4[:,0]
         self.eta3 = self.ave4[:,2]/self.ave4[:,0]
         self.eta4 = self.ave4[:,3]/self.ave4[:,0]
+
+        # Per-switch-state ratios, for the independent ellipse fits.
+        self.eta2A = self.raw8A[:,1]/self.raw8A[:,0]
+        self.eta3A = self.raw8A[:,2]/self.raw8A[:,0]
+        self.eta4A = self.raw8A[:,3]/self.raw8A[:,0]
+        self.eta2B = self.raw8B[:,1]/self.raw8B[:,0]
+        self.eta3B = self.raw8B[:,2]/self.raw8B[:,0]
+        self.eta4B = self.raw8B[:,3]/self.raw8B[:,0]
 
     def calc(self):
         if self.cfg.modulation:
@@ -111,23 +125,39 @@ class NPoints:
             self._calc_no_modulation()
         self.setGoodFlag()
 
+    def _fit_eta_ellipses(self,eta2,eta3,eta4):
+        """Fits eta2/eta3/(eta4) ellipses for one switch state and returns
+        (EtaElli, mgain1, mratio1)."""
+        EtaElli = np.zeros(3, dtype=object)
+        EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta2)
+        EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta3)
+        if self.cfg.fit4:
+            EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta4)
+        gain1_re = EtaElli[0].semi_major / EtaElli[1].semi_major
+        gain1_im = EtaElli[0].semi_minor / EtaElli[1].semi_minor
+        mgain1  = 0.5*(gain1_re + gain1_im)
+        mratio1 = mgain1*EtaElli[1].eta_o - EtaElli[0].eta_o
+        return EtaElli, mgain1, mratio1
+
     def _calc_with_modulation(self):
         self.precalc()
         self.RawElli = np.zeros(self.N//2, dtype=object)
-        self.EtaElli = np.zeros(3, dtype=object)
         for i in range(4):
             if i==3 and not self.cfg.fit4:
                 break
             if i!=0:
                 self.RawElli[i] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
-        self.EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta2)
-        self.EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta3)
-        if self.cfg.fit4:
-            self.EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.eta4)
-        gain1_re = self.EtaElli[0].semi_major / self.EtaElli[1].semi_major
-        gain1_im = self.EtaElli[0].semi_minor / self.EtaElli[1].semi_minor
-        self.Res['mgain1']  = 0.5*(gain1_re + gain1_im)
-        self.Res['mratio1'] = self.Res['mgain1']*self.EtaElli[1].eta_o - self.EtaElli[0].eta_o
+
+        # Fit the eta2/eta3/(eta4) ellipses independently for each switch
+        # state, then average the resulting mratio1 (not the raw points).
+        self.EtaElliA, mgain1A, mratio1A = self._fit_eta_ellipses(self.eta2A,self.eta3A,self.eta4A)
+        self.EtaElliB, mgain1B, mratio1B = self._fit_eta_ellipses(self.eta2B,self.eta3B,self.eta4B)
+        self.EtaElli = self.EtaElliA  # backward-compat alias for existing plotting code
+
+        self.Res['mratio1A'] = mratio1A
+        self.Res['mratio1B'] = mratio1B
+        self.Res['mgain1']  = 0.5*(mgain1A + mgain1B)
+        self.Res['mratio1'] = 0.5*(mratio1A + mratio1B)
         self.Res['R']    = np.real(1/(self.Res['Yref']*self.Res['mratio1']))
         self.Res['fnew'] = self.Res['fsig'] * -np.imag(self.Res['mratio1'])
 
@@ -144,6 +174,8 @@ class NPoints:
         # No ellipse objects — set to None so callers can guard against it
         self.RawElli = np.array([None] * (self.N//2))
         self.EtaElli = np.array([None, None, None])
+        self.EtaElliA = np.array([None, None, None])
+        self.EtaElliB = np.array([None, None, None])
 
         eta2_mean = np.mean(self.eta2)
         eta3_mean = np.mean(self.eta3)
