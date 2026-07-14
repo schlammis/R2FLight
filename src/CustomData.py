@@ -93,8 +93,12 @@ class NPoints:
                 self.raw8[i,j] =  self.Data[i].Data[j].Vc*cf
             self.ctrl[i,0] =self.Data[i].V1c
             self.ctrl[i,1] =self.Data[i].V2c
-        self.ave4  = 0.5*(self.raw8[::2,:]+self.raw8[1::2,:])
-        self.ctrla = 0.5*(self.ctrl[::2,:]+self.ctrl[1::2,:])
+        # First half of the points is one full ellipse in switch position A,
+        # second half is a full ellipse in switch position B (same angle
+        # sequence in both halves) -- average matching angles across the two.
+        half = self.N // 2
+        self.ave4  = 0.5*(self.raw8[:half,:]+self.raw8[half:,:])
+        self.ctrla = 0.5*(self.ctrl[:half,:]+self.ctrl[half:,:])
 
         self.eta2 = self.ave4[:,1]/self.ave4[:,0]
         self.eta3 = self.ave4[:,2]/self.ave4[:,0]

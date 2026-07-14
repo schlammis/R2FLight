@@ -18,8 +18,8 @@ class Meas(QObject):
 
     def __init__(self,mutex,parent,NDpts):
         super(QObject, self).__init__()
-        self.NDpts = NDpts  #4 for a circle double points means in both switch positions
-        self.Npts = 2*NDpts #8 for a circle double points means in both switch positions
+        self.NDpts = NDpts  # number of points in one full ellipse sweep (one switch position)
+        self.Npts = 2*NDpts # NDpts points in switch position A, then NDpts more in switch position B
         self.par =parent
         self.isidle =True
         self.mutex       = mutex
@@ -82,14 +82,14 @@ class Meas(QObject):
     def prepForMeas(self):
         if self.co==0:
             self.par.myprint("V1= {0:8.3f}  V2={1:8.3f} dV2={2:8.3f}  f={3:8.5f} Hz".format(self.V1c,self.V2c,self.dV2,self.fsig/1000))
-        if self.co%2==0:
-            self.dvm.write('ROUT:OPEN (@211,248)')   
+        if self.co<self.NDpts:
+            self.dvm.write('ROUT:OPEN (@211,248)')
             self.dvm.write('ROUT:CLOS (@218,241)') # 8->1 1->4
         else:
-            self.dvm.write('ROUT:OPEN (@218,241)')   
+            self.dvm.write('ROUT:OPEN (@218,241)')
             self.dvm.write('ROUT:CLOS (@211,248)') # 1->1 8->4
         if self.modulation:
-            ang = (self.co//2)/self.NDpts*2*np.pi
+            ang = (self.co%self.NDpts)/self.NDpts*2*np.pi
             a = self.dV2*1.2
             b = self.dV2*0.6
             theta = 30/180*np.pi
@@ -174,7 +174,7 @@ class Meas(QObject):
                 pass
 
     def getvals(self):
-        if self.co%2==0:
+        if self.co<self.NDpts:
             ch1=self.dvm.query_binary_values('FETCH3? (@101)',  datatype='f', is_big_endian=True)
             ch2=self.dvm.query_binary_values('FETCH3? (@102)',  datatype='f', is_big_endian=True)
         else:

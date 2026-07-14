@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         self.mutex = mutex
         self.thread = QThread()
         self.cfg = R2FConfig.CFG()
-        self.Npts = self.cfg.getintkey('NPTS')  # number of double points, i.e. the number of points in the circle
+        self.Npts = self.cfg.getintkey('NPTS')  # number of points in one full ellipse sweep (one switch position)
         self.fsig =  1591.511
         self.mytext = []
         self.mytextmaxlen = 1000
