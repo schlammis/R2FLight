@@ -52,8 +52,8 @@ class MainWindow(QMainWindow):
         self.quit = False
         self.loopfinished = False
         self._meas_running = False
-        self._partial_V2 = []   # raw phasors accumulated during current ellipse
-        self._partial_V3 = []
+        self._partial_eta2 = []   # live eta2/eta3 preview accumulated during current ellipse
+        self._partial_eta3 = []
         self.mutex = mutex
         self.thread = QThread()
         self.cfg = R2FConfig.CFG()
@@ -295,14 +295,14 @@ class MainWindow(QMainWindow):
         self.rSet = MySet
         self.progressBar.setValue(MySet.i + 1)
         if MySet.i == 0:
-            self._partial_V2 = []
-            self._partial_V3 = []
-        # phase-normalise this single point and accumulate
+            self._partial_eta2 = []
+            self._partial_eta3 = []
+        # live, per-point preview of eta2/eta3 (V2/V1, V3/V1) as points stream in,
+        # ahead of the final switch-averaged/ellipse-fit values
         Vc0 = MySet.Data[0].Vc
         if abs(Vc0) > 0:
-            cf = np.exp(-1j * np.angle(Vc0))
-            self._partial_V2.append(MySet.Data[1].Vc * cf / (Vc0 * cf))
-            self._partial_V3.append(MySet.Data[2].Vc * cf / (Vc0 * cf))
+            self._partial_eta2.append(MySet.Data[1].Vc / Vc0)
+            self._partial_eta3.append(MySet.Data[2].Vc / Vc0)
         self.replot()
 
     def _on_pause_toggled(self, paused):
@@ -469,11 +469,21 @@ class MainWindow(QMainWindow):
     def plotscatter(self):
         self._clear_grid(self.scatterplots)
 
+        # top row: raw channel voltages (phase-normalised to channel 1). bottom
+        # row: eta2/eta3 ratios -- always eta, whether from the completed
+        # per-switch-state fits below or the live per-point preview further down.
+        self.scatterplots[0, 0].canvas.ax1.set_xlabel('Re(V2)')
+        self.scatterplots[0, 0].canvas.ax1.set_ylabel('Im(V2)')
+        self.scatterplots[0, 1].canvas.ax1.set_xlabel('Re(V3)')
+        self.scatterplots[0, 1].canvas.ax1.set_ylabel('Im(V3)')
+        self.scatterplots[1, 0].canvas.ax1.set_xlabel('Re(eta2)')
+        self.scatterplots[1, 0].canvas.ax1.set_ylabel('Im(eta2)')
+        self.scatterplots[1, 1].canvas.ax1.set_xlabel('Re(eta3)')
+        self.scatterplots[1, 1].canvas.ax1.set_ylabel('Im(eta3)')
+
         # completed ellipse points — only if we have a result
         if self.rData.Res['ts'] > 0:
-            #self.scatterplots[0, 0].canvas.ax1.plot(np.real(self.rData.ave4[:, 0]), np.imag(self.rData.ave4[:, 0]), 'mo')
-            #self.scatterplots[0, 1].canvas.ax1.plot(np.real(self.rData.ave4[:, 2]), np.imag(self.rData.ave4[:, 1]), 'co')
-            # switch state A (solid) and B (triangles) are fit independently,
+            # switch state A (circles) and B (triangles) are fit independently,
             # so show both point sets and both ellipse fits rather than the
             # switch-averaged view the fit no longer uses.
             self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2A), np.imag(self.rData.eta2A), 'ro')
@@ -499,14 +509,13 @@ class MainWindow(QMainWindow):
             np.savetxt(os.path.join(self.yyyymmdir, 'V2.dat'),
                        np.vstack((np.real(self.rData.ave4[:, 1]), np.imag(self.rData.ave4[:, 1]))).T)
 
-        # partial (in-progress) points — shown from point 0 of every cycle
-        if self._partial_V2:
-            pv2 = np.array(self._partial_V2)
-            pv3 = np.array(self._partial_V3)
-            self.scatterplots[0, 0].canvas.ax1.plot(np.real(pv2), np.imag(pv2), 'm+', markersize=8)
-            self.scatterplots[0, 1].canvas.ax1.plot(np.real(pv3), np.imag(pv3), 'c+', markersize=8)
-            self.scatterplots[1, 0].canvas.ax1.plot(np.real(pv2), np.imag(pv2), 'r+', markersize=8)
-            self.scatterplots[1, 1].canvas.ax1.plot(np.real(pv3), np.imag(pv3), 'b+', markersize=8)
+        # partial (in-progress) eta2/eta3 preview — shown from point 0 of every
+        # cycle; belongs on the eta row only, not the raw-voltage row above.
+        if self._partial_eta2:
+            peta2 = np.array(self._partial_eta2)
+            peta3 = np.array(self._partial_eta3)
+            self.scatterplots[1, 0].canvas.ax1.plot(np.real(peta2), np.imag(peta2), 'r+', markersize=8)
+            self.scatterplots[1, 1].canvas.ax1.plot(np.real(peta3), np.imag(peta3), 'b+', markersize=8)
 
         self._draw_grid(self.scatterplots)
 
