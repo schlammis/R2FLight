@@ -51,7 +51,6 @@ class NPointsConfig:
     g2: float = 1.0
     ratio: float = 10.0
     N: int = 8
-    fit4: bool = True
     Cref: float = 100e-12
     modulation: bool = True
     
@@ -100,23 +99,19 @@ class NPoints:
         self.raw8A, self.raw8B = self.raw8[:half,:], self.raw8[half:,:]
         self.ctrlA, self.ctrlB = self.ctrl[:half,:], self.ctrl[half:,:]
 
-        # Switch-averaged view -- kept only for the raw-channel diagnostic
-        # ellipses (RawElli) and the eta*.dat/V2.dat logging, which stay on
-        # the combined view. The eta ellipse fit itself (below) no longer
-        # uses this -- each switch state is fit independently instead.
+        # Switch-averaged view -- kept only for the eta*.dat/V2.dat logging.
+        # The R calculation and the scatter-tab display both use the
+        # per-switch-state values below instead.
         self.ave4  = 0.5*(self.raw8A+self.raw8B)
         self.ctrla = 0.5*(self.ctrlA+self.ctrlB)
         self.eta1 = self.ave4[:,1]/self.ave4[:,0]
         self.eta3 = self.ave4[:,2]/self.ave4[:,0]
-        self.eta4 = self.ave4[:,3]/self.ave4[:,0]
 
-        # Per-switch-state ratios, for the independent ellipse fits.
+        # Per-switch-state ratios, for the independent regression fits.
         self.eta1A = self.raw8A[:,1]/self.raw8A[:,0]
         self.eta3A = self.raw8A[:,2]/self.raw8A[:,0]
-        self.eta4A = self.raw8A[:,3]/self.raw8A[:,0]
         self.eta1B = self.raw8B[:,1]/self.raw8B[:,0]
         self.eta3B = self.raw8B[:,2]/self.raw8B[:,0]
-        self.eta4B = self.raw8B[:,3]/self.raw8B[:,0]
 
     def calc(self):
         if self.cfg.modulation:
@@ -124,17 +119,6 @@ class NPoints:
         else:
             self._calc_no_modulation()
         self.setGoodFlag()
-
-    def _fit_eta_ellipses(self,eta1,eta3,eta4):
-        """Fits eta1/eta3/(eta4) ellipses for one switch state, for the
-        scatter-tab display only -- R itself comes from the linear
-        regression in _fit_eta_regression instead."""
-        EtaElli = np.zeros(3, dtype=object)
-        EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta1)
-        EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta3)
-        if self.cfg.fit4:
-            EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta4)
-        return EtaElli
 
     def _fit_eta_regression(self,eta1,eta3):
         """Complex linear regression eta1 = mgain1*eta3 + const, returning
@@ -154,22 +138,19 @@ class NPoints:
 
     def _calc_with_modulation(self):
         self.precalc()
-        self.RawElli = np.zeros(self.N//2, dtype=object)
-        for i in range(4):
-            if i==3 and not self.cfg.fit4:
-                break
-            if i!=0:
-                self.RawElli[i] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
+        # V2 (raw channel 1) ellipse, fit per switch state -- scatter-tab
+        # display only, purely a visual check on the raw trajectory shape.
+        self.V2ElliA = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8A[:,1])
+        self.V2ElliB = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8B[:,1])
 
-        # eta1/eta3 ellipses are still fit per switch state for the scatter-tab
-        # display. R/mratio1 itself now comes from a linear regression of eta1
-        # on eta3 for each switch state, then averaging the two results.
-        self.EtaElliA = self._fit_eta_ellipses(self.eta1A,self.eta3A,self.eta4A)
-        self.EtaElliB = self._fit_eta_ellipses(self.eta1B,self.eta3B,self.eta4B)
-        self.EtaElli = self.EtaElliA  # backward-compat alias for existing plotting code
-
+        # R/mratio1 comes from a linear regression of eta1 on eta3 for each
+        # switch state, then averaging the two results. eta1A_fit/eta1B_fit
+        # are the regression's own prediction of eta1 at the actual eta3
+        # points, for a visual goodness-of-fit check on the scatter tab.
         mgain1A, mratio1A = self._fit_eta_regression(self.eta1A,self.eta3A)
         mgain1B, mratio1B = self._fit_eta_regression(self.eta1B,self.eta3B)
+        self.eta1A_fit = mgain1A*self.eta3A - mratio1A
+        self.eta1B_fit = mgain1B*self.eta3B - mratio1B
 
         self.Res['mratio1A'] = mratio1A
         self.Res['mratio1B'] = mratio1B
@@ -188,11 +169,11 @@ class NPoints:
         recovers the gain ratio robustly even with as few as 4 points.
         """
         self.precalc()
-        # No ellipse objects — set to None so callers can guard against it
-        self.RawElli = np.array([None] * (self.N//2))
-        self.EtaElli = np.array([None, None, None])
-        self.EtaElliA = np.array([None, None, None])
-        self.EtaElliB = np.array([None, None, None])
+        # No ellipse/fit objects — set to None so callers can guard against it
+        self.V2ElliA = None
+        self.V2ElliB = None
+        self.eta1A_fit = None
+        self.eta1B_fit = None
 
         eta1_mean = np.mean(self.eta1)
         eta3_mean = np.mean(self.eta3)
