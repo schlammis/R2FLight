@@ -52,8 +52,11 @@ class MainWindow(QMainWindow):
         self.quit = False
         self.loopfinished = False
         self._meas_running = False
-        self._partial_eta2 = []   # live eta2/eta3 preview accumulated during current ellipse
-        self._partial_eta3 = []
+        # live eta2/eta3 preview accumulated during current ellipse, split by switch state
+        self._partial_eta2A = []
+        self._partial_eta2B = []
+        self._partial_eta3A = []
+        self._partial_eta3B = []
         self.mutex = mutex
         self.thread = QThread()
         self.cfg = R2FConfig.CFG()
@@ -295,14 +298,23 @@ class MainWindow(QMainWindow):
         self.rSet = MySet
         self.progressBar.setValue(MySet.i + 1)
         if MySet.i == 0:
-            self._partial_eta2 = []
-            self._partial_eta3 = []
+            self._partial_eta2A = []
+            self._partial_eta2B = []
+            self._partial_eta3A = []
+            self._partial_eta3B = []
         # live, per-point preview of eta2/eta3 (V2/V1, V3/V1) as points stream in,
-        # ahead of the final switch-averaged/ellipse-fit values
+        # ahead of the final switch-averaged/ellipse-fit values -- split by
+        # switch state (first Npts points are switch A, next Npts are switch B)
         Vc0 = MySet.Data[0].Vc
         if abs(Vc0) > 0:
-            self._partial_eta2.append(MySet.Data[1].Vc / Vc0)
-            self._partial_eta3.append(MySet.Data[2].Vc / Vc0)
+            eta2 = MySet.Data[1].Vc / Vc0
+            eta3 = MySet.Data[2].Vc / Vc0
+            if MySet.i < self.Npts:
+                self._partial_eta2A.append(eta2)
+                self._partial_eta3A.append(eta3)
+            else:
+                self._partial_eta2B.append(eta2)
+                self._partial_eta3B.append(eta3)
         self.replot()
 
     def _on_pause_toggled(self, paused):
@@ -421,6 +433,16 @@ class MainWindow(QMainWindow):
             for j in range(2):
                 plots[i, j].canvas.draw()
 
+    @staticmethod
+    def _plot_switch_points(ax, ptsA, ptsB, color):
+        """Open circles for switch position 0 (straight), solid squares for
+        switch position 1 (cross) -- used for every switch-differentiated
+        scatter series."""
+        ax.plot(np.real(ptsA), np.imag(ptsA), marker='o', linestyle='None',
+                markerfacecolor='none', markeredgecolor=color)
+        ax.plot(np.real(ptsB), np.imag(ptsB), marker='s', linestyle='None',
+                markerfacecolor=color, markeredgecolor=color)
+
     def plotraw(self):
         if self.rSet.ts <= 0:
             return
@@ -483,13 +505,17 @@ class MainWindow(QMainWindow):
 
         # completed ellipse points — only if we have a result
         if self.rData.Res['ts'] > 0:
-            # switch state A (circles) and B (triangles) are fit independently,
-            # so show both point sets and both ellipse fits rather than the
-            # switch-averaged view the fit no longer uses.
-            self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2A), np.imag(self.rData.eta2A), 'ro')
-            self.scatterplots[1, 0].canvas.ax1.plot(np.real(self.rData.eta2B), np.imag(self.rData.eta2B), 'y^')
-            self.scatterplots[1, 1].canvas.ax1.plot(np.real(self.rData.eta3A), np.imag(self.rData.eta3A), 'bo')
-            self.scatterplots[1, 1].canvas.ax1.plot(np.real(self.rData.eta3B), np.imag(self.rData.eta3B), 'c^')
+            # switch state A and B are fit independently, so show both point
+            # sets and both ellipse fits rather than the switch-averaged view
+            # the fit no longer uses. Open circles = switch 0, solid squares = switch 1.
+            self._plot_switch_points(self.scatterplots[0, 0].canvas.ax1,
+                                      self.rData.raw8A[:, 1], self.rData.raw8B[:, 1], 'm')
+            self._plot_switch_points(self.scatterplots[0, 1].canvas.ax1,
+                                      self.rData.raw8A[:, 2], self.rData.raw8B[:, 2], 'c')
+            self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
+                                      self.rData.eta2A, self.rData.eta2B, 'r')
+            self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1,
+                                      self.rData.eta3A, self.rData.eta3B, 'b')
             if self.rData.RawElli[1] is not None:
                 self.rData.RawElli[1].plot_elli(self.scatterplots[0, 0].canvas.ax1, ellipse_color='m')
             if self.rData.RawElli[2] is not None:
@@ -511,11 +537,11 @@ class MainWindow(QMainWindow):
 
         # partial (in-progress) eta2/eta3 preview — shown from point 0 of every
         # cycle; belongs on the eta row only, not the raw-voltage row above.
-        if self._partial_eta2:
-            peta2 = np.array(self._partial_eta2)
-            peta3 = np.array(self._partial_eta3)
-            self.scatterplots[1, 0].canvas.ax1.plot(np.real(peta2), np.imag(peta2), 'r+', markersize=8)
-            self.scatterplots[1, 1].canvas.ax1.plot(np.real(peta3), np.imag(peta3), 'b+', markersize=8)
+        if self._partial_eta2A or self._partial_eta2B:
+            self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
+                                      np.array(self._partial_eta2A), np.array(self._partial_eta2B), 'r')
+            self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1,
+                                      np.array(self._partial_eta3A), np.array(self._partial_eta3B), 'b')
 
         self._draw_grid(self.scatterplots)
 
