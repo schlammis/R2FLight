@@ -114,6 +114,11 @@ class MainWindow(QMainWindow):
                 self.scatterplots[i, j] = mplwidget.MplWidget(rightax=False)
                 self.scatterplots[i, j].setfmt("%.5f", "%.6f")
 
+        self.residualplots = np.empty((2, 2), dtype=object)
+        for i in range(2):
+            for j in range(2):
+                self.residualplots[i, j] = mplwidget.MplWidget(rightax=False)
+
         self.resultplots = np.empty((2, 2), dtype=object)
         for i in range(2):
             for j in range(2):
@@ -151,8 +156,6 @@ class MainWindow(QMainWindow):
         self.cbAutoFreq.setChecked(True)
         self.cbModOff = QCheckBox("modulation off")
         self.cbModOff.setChecked(False)
-        self.cbResidualPSA = QCheckBox("plot residual PSA")
-        self.cbResidualPSA.setChecked(False)
 
         self.buPause = QPushButton("Pause")
         self.buPause.setCheckable(True)
@@ -164,7 +167,6 @@ class MainWindow(QMainWindow):
         vlayout.addWidget(self.fstep)
         vlayout.addWidget(self.cbAutoFreq)
         vlayout.addWidget(self.cbModOff)
-        vlayout.addWidget(self.cbResidualPSA)
         vlayout.addWidget(QLabel('current f:'))
         self.laf = QLabel()
         self._update_freq_label()
@@ -223,7 +225,6 @@ class MainWindow(QMainWindow):
         self.buPause.toggled.connect(self._on_pause_toggled)
         self.bufp.clicked.connect(self.fp)
         self.bufm.clicked.connect(self.fm)
-        self.cbResidualPSA.toggled.connect(self.plotraw)
 
     def _update_freq_label(self):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
@@ -453,21 +454,18 @@ class MainWindow(QMainWindow):
         phi = -np.angle(-1j * Vc)
         while phi < 0:
             phi += 2 * np.pi
-        t   = phi / (2 * np.pi * self.rSet.fsig / self.rSet.fsamp)
-        be1 = int(t)
-        be  = be1
-        en  = int(self.rSet.fsamp / self.rSet.fsig * 2) + be1
+        period = self.rSet.fsamp / self.rSet.fsig
+        be1 = phi / (2 * np.pi) * period
+        # be1 only phase-aligns within the first period; shift by whole
+        # periods so the displayed window sits near the middle of the full
+        # acquisition instead of always right at the start.
+        n_shift = round((len(self.rSet.Data[0].data) / 2 - be1) / period)
+        be = int(be1 + n_shift * period)
+        en = int(period * 2) + be
 
-        if self.cbResidualPSA.isChecked():
-            src0 = self.rSet.Data[0].data - self.rSet.Data[0].fv
-            src1 = self.rSet.Data[1].data - self.rSet.Data[1].fv
-            src2 = self.rSet.Data[2].data - self.rSet.Data[2].fv
-            psa_title = 'residual PSA (sine removed)'
-        else:
-            src0 = self.rSet.Data[0].data
-            src1 = self.rSet.Data[1].data
-            src2 = self.rSet.Data[2].data
-            psa_title = 'PSA'
+        src0 = self.rSet.Data[0].data
+        src1 = self.rSet.Data[1].data
+        src2 = self.rSet.Data[2].data
 
         psa1, f1 = spectral3.mypsa(src0, 1 / self.rSet.fsamp)
         psa2, f2 = spectral3.mypsa(src1, 1 / self.rSet.fsamp)
@@ -484,9 +482,38 @@ class MainWindow(QMainWindow):
         self.rawplots[1, 0].canvas.ax1.plot(self.t[be:en], self.rSet.Data[2].fv[be:en], 'k-')
         self.rawplots[1, 1].canvas.ax1.set_xscale('log')
         self.rawplots[1, 1].canvas.ax1.set_yscale('log')
-        self.rawplots[1, 1].canvas.ax1.set_title(psa_title)
+        self.rawplots[1, 1].canvas.ax1.set_title('PSA')
 
         self._draw_grid(self.rawplots)
+
+    def plotresiduals(self):
+        if self.rSet.ts <= 0:
+            return
+        self._clear_grid(self.residualplots)
+
+        t = np.arange(len(self.rSet.Data[0].data))
+        res0 = self.rSet.Data[0].data - self.rSet.Data[0].fv
+        res1 = self.rSet.Data[1].data - self.rSet.Data[1].fv
+        res2 = self.rSet.Data[2].data - self.rSet.Data[2].fv
+
+        self.residualplots[0, 0].canvas.ax1.plot(t, res0, 'r-', linewidth=0.5)
+        self.residualplots[0, 1].canvas.ax1.plot(t, res1, 'g-', linewidth=0.5)
+        self.residualplots[1, 0].canvas.ax1.plot(t, res2, 'b-', linewidth=0.5)
+        for i, j in ((0, 0), (0, 1), (1, 0)):
+            self.residualplots[i, j].canvas.ax1.set_xlabel('sample')
+            self.residualplots[i, j].canvas.ax1.set_ylabel('residual')
+
+        psa1, f1 = spectral3.mypsa(res0, 1 / self.rSet.fsamp)
+        psa2, f2 = spectral3.mypsa(res1, 1 / self.rSet.fsamp)
+        psa3, f3 = spectral3.mypsa(res2, 1 / self.rSet.fsamp)
+        self.residualplots[1, 1].canvas.ax1.plot(f1, psa1, 'r-')
+        self.residualplots[1, 1].canvas.ax1.plot(f2, psa2, 'g-')
+        self.residualplots[1, 1].canvas.ax1.plot(f3, psa3, 'b-')
+        self.residualplots[1, 1].canvas.ax1.set_xscale('log')
+        self.residualplots[1, 1].canvas.ax1.set_yscale('log')
+        self.residualplots[1, 1].canvas.ax1.set_title('residual PSA')
+
+        self._draw_grid(self.residualplots)
 
     def plotscatter(self):
         self._clear_grid(self.scatterplots)
@@ -595,6 +622,8 @@ class MainWindow(QMainWindow):
             self.plotraw()
         elif tat == 'scatter':
             self.plotscatter()
+        elif tat == 'residuals':
+            self.plotresiduals()
         elif tat == 'results':
             self.plotresults()
         elif tat == 'msg':
@@ -632,17 +661,22 @@ class MyTabWidget(QWidget):
         self.master = QTabWidget()
         self.master.resize(300, 200)
 
-        tablabels = ['raw', 'scatter', 'results', 'msg', 'config']
+        tablabels = ['raw', 'scatter', 'residuals', 'results', 'msg', 'config']
         self.mytabs = [QWidget() for _ in tablabels]
         for tab, label in zip(self.mytabs, tablabels):
             self.master.addTab(tab, label)
         tabs_by_label = dict(zip(tablabels, self.mytabs))
 
-        # raw / scatter / results tabs
-        plot_groups = [parent.rawplots, parent.scatterplots, parent.resultplots]
-        for tab, plots in zip(self.mytabs[0:3], plot_groups):
+        # tabs that are just a 2x2 grid of plots
+        plot_groups = {
+            'raw': parent.rawplots,
+            'scatter': parent.scatterplots,
+            'residuals': parent.residualplots,
+            'results': parent.resultplots,
+        }
+        for label, plots in plot_groups.items():
             glayout = QGridLayout()
-            tab.setLayout(glayout)
+            tabs_by_label[label].setLayout(glayout)
             for i in range(2):
                 for j in range(2):
                     glayout.addWidget(plots[i, j], i, j)
