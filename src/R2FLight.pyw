@@ -52,6 +52,10 @@ class MainWindow(QMainWindow):
         self.quit = False
         self.loopfinished = False
         self._meas_running = False
+        # True only while self.rData's fit actually corresponds to the cycle
+        # currently being displayed -- cleared the moment a new cycle starts
+        # collecting points, so stale fit overlays don't linger on screen.
+        self._fit_is_current = False
         # live V2/V3/eta1/eta3 preview accumulated during current ellipse,
         # split by switch state, so the scatter tab looks the same whether a
         # measurement is in progress or complete
@@ -271,6 +275,7 @@ class MainWindow(QMainWindow):
 
     def onNewData(self, MyData: CustomData.NPoints):
         self.rData = MyData
+        self._fit_is_current = True
         line = [self.rData.Res["ts"], self.rData.Res["fsig"],
                 np.real(self.rData.Res["mratio1"]), np.imag(self.rData.Res["mratio1"]),
                 self.rData.Res["R"], self.rData.Res["fnew"]]
@@ -305,6 +310,7 @@ class MainWindow(QMainWindow):
         self.rSet = MySet
         self.progressBar.setValue(MySet.i + 1)
         if MySet.i == 0:
+            self._fit_is_current = False
             self._partial_v2A = []
             self._partial_v2B = []
             self._partial_v3A = []
@@ -560,12 +566,13 @@ class MainWindow(QMainWindow):
         self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1, eta1A, eta1B, 'r')
         self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1, eta3A, eta3B, 'b')
 
-        # Fit overlays come from the most recently *completed* fit and stay on
-        # screen while the next cycle streams in -- V2 ellipses (both switch
-        # states, top-left only, no ellipses anywhere else), and the fitted
-        # eta1 as solid symbols so the regression's goodness of fit is visible
-        # against the open (raw) eta1 symbols above.
-        if self.rData.Res['ts'] > 0:
+        # Fit overlays -- V2 ellipses (both switch states, top-left only, no
+        # ellipses anywhere else), and the fitted eta1 as solid symbols so the
+        # regression's goodness of fit is visible against the open (raw) eta1
+        # symbols above. Only shown while self.rData's fit actually matches
+        # the points currently on screen -- cleared as soon as a new cycle
+        # starts collecting, not left showing the previous cycle's stale fit.
+        if self.rData.Res['ts'] > 0 and self._fit_is_current:
             if self.rData.V2ElliA is not None:
                 self.rData.V2ElliA.plot_elli(self.scatterplots[0, 0].canvas.ax1, ellipse_color='m')
             if self.rData.V2ElliB is not None:
@@ -574,6 +581,7 @@ class MainWindow(QMainWindow):
                 self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
                                           self.rData.eta1A_fit, self.rData.eta1B_fit, 'r', filled=True)
 
+        if self.rData.Res['ts'] > 0:
             np.savetxt(os.path.join(self.yyyymmdir, 'eta1.dat'),
                        np.vstack((np.real(self.rData.eta1), np.imag(self.rData.eta1))).T)
             np.savetxt(os.path.join(self.yyyymmdir, 'eta3.dat'),
