@@ -106,15 +106,15 @@ class NPoints:
         # uses this -- each switch state is fit independently instead.
         self.ave4  = 0.5*(self.raw8A+self.raw8B)
         self.ctrla = 0.5*(self.ctrlA+self.ctrlB)
-        self.eta2 = self.ave4[:,1]/self.ave4[:,0]
+        self.eta1 = self.ave4[:,1]/self.ave4[:,0]
         self.eta3 = self.ave4[:,2]/self.ave4[:,0]
         self.eta4 = self.ave4[:,3]/self.ave4[:,0]
 
         # Per-switch-state ratios, for the independent ellipse fits.
-        self.eta2A = self.raw8A[:,1]/self.raw8A[:,0]
+        self.eta1A = self.raw8A[:,1]/self.raw8A[:,0]
         self.eta3A = self.raw8A[:,2]/self.raw8A[:,0]
         self.eta4A = self.raw8A[:,3]/self.raw8A[:,0]
-        self.eta2B = self.raw8B[:,1]/self.raw8B[:,0]
+        self.eta1B = self.raw8B[:,1]/self.raw8B[:,0]
         self.eta3B = self.raw8B[:,2]/self.raw8B[:,0]
         self.eta4B = self.raw8B[:,3]/self.raw8B[:,0]
 
@@ -125,31 +125,31 @@ class NPoints:
             self._calc_no_modulation()
         self.setGoodFlag()
 
-    def _fit_eta_ellipses(self,eta2,eta3,eta4):
-        """Fits eta2/eta3/(eta4) ellipses for one switch state, for the
+    def _fit_eta_ellipses(self,eta1,eta3,eta4):
+        """Fits eta1/eta3/(eta4) ellipses for one switch state, for the
         scatter-tab display only -- R itself comes from the linear
         regression in _fit_eta_regression instead."""
         EtaElli = np.zeros(3, dtype=object)
-        EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta2)
+        EtaElli[0] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta1)
         EtaElli[1] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta3)
         if self.cfg.fit4:
             EtaElli[2] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(eta4)
         return EtaElli
 
-    def _fit_eta_regression(self,eta2,eta3):
-        """Complex linear regression eta2 = mgain1*eta3 + const, returning
-        (mgain1, mratio1). The bridge relation omega*C*R = j*eta2 + j*(R/Z)*eta3
-        makes eta2 a linear function of eta3 with complex slope mgain1 = -(R/Z)
+    def _fit_eta_regression(self,eta1,eta3):
+        """Complex linear regression eta1 = mgain1*eta3 + const, returning
+        (mgain1, mratio1). The bridge relation omega*C*R = j*eta1 + j*(R/Z)*eta3
+        makes eta1 a linear function of eta3 with complex slope mgain1 = -(R/Z)
         regardless of the modulation trajectory's shape, so a direct regression
         is less restrictive than fitting an ellipse to each and taking an
         axis-ratio gain."""
-        eta2_mean = np.mean(eta2)
+        eta1_mean = np.mean(eta1)
         eta3_mean = np.mean(eta3)
-        d_eta2 = eta2 - eta2_mean
+        d_eta1 = eta1 - eta1_mean
         d_eta3 = eta3 - eta3_mean
         denom = np.sum(np.abs(d_eta3)**2)
-        mgain1  = np.dot(d_eta2, np.conj(d_eta3)) / denom
-        mratio1 = mgain1*eta3_mean - eta2_mean
+        mgain1  = np.dot(d_eta1, np.conj(d_eta3)) / denom
+        mratio1 = mgain1*eta3_mean - eta1_mean
         return mgain1, mratio1
 
     def _calc_with_modulation(self):
@@ -161,15 +161,15 @@ class NPoints:
             if i!=0:
                 self.RawElli[i] = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.ave4[:,i])
 
-        # eta2/eta3 ellipses are still fit per switch state for the scatter-tab
-        # display. R/mratio1 itself now comes from a linear regression of eta2
+        # eta1/eta3 ellipses are still fit per switch state for the scatter-tab
+        # display. R/mratio1 itself now comes from a linear regression of eta1
         # on eta3 for each switch state, then averaging the two results.
-        self.EtaElliA = self._fit_eta_ellipses(self.eta2A,self.eta3A,self.eta4A)
-        self.EtaElliB = self._fit_eta_ellipses(self.eta2B,self.eta3B,self.eta4B)
+        self.EtaElliA = self._fit_eta_ellipses(self.eta1A,self.eta3A,self.eta4A)
+        self.EtaElliB = self._fit_eta_ellipses(self.eta1B,self.eta3B,self.eta4B)
         self.EtaElli = self.EtaElliA  # backward-compat alias for existing plotting code
 
-        mgain1A, mratio1A = self._fit_eta_regression(self.eta2A,self.eta3A)
-        mgain1B, mratio1B = self._fit_eta_regression(self.eta2B,self.eta3B)
+        mgain1A, mratio1A = self._fit_eta_regression(self.eta1A,self.eta3A)
+        mgain1B, mratio1B = self._fit_eta_regression(self.eta1B,self.eta3B)
 
         self.Res['mratio1A'] = mratio1A
         self.Res['mratio1B'] = mratio1B
@@ -181,10 +181,10 @@ class NPoints:
     def _calc_no_modulation(self):
         """Estimate gain and R from noise correlation when V2 modulation is off.
 
-        With no intentional modulation the N/2 phasors (eta2, eta3) cluster
+        With no intentional modulation the N/2 phasors (eta1, eta3) cluster
         around a single point.  Their fluctuations are dominated by noise that
         is largely shared (common 1/V1 denominator noise), so the OLS regression
-            d_eta2 = mgain * d_eta3  +  independent noise
+            d_eta1 = mgain * d_eta3  +  independent noise
         recovers the gain ratio robustly even with as few as 4 points.
         """
         self.precalc()
@@ -194,12 +194,12 @@ class NPoints:
         self.EtaElliA = np.array([None, None, None])
         self.EtaElliB = np.array([None, None, None])
 
-        eta2_mean = np.mean(self.eta2)
+        eta1_mean = np.mean(self.eta1)
         eta3_mean = np.mean(self.eta3)
-        d_eta2 = self.eta2 - eta2_mean
+        d_eta1 = self.eta1 - eta1_mean
         d_eta3 = self.eta3 - eta3_mean
 
-        # OLS: d_eta2 = mgain * d_eta3  →  mgain = Σ(d_eta2·d_eta3*) / Σ|d_eta3|²
+        # OLS: d_eta1 = mgain * d_eta3  →  mgain = Σ(d_eta1·d_eta3*) / Σ|d_eta3|²
         denom = np.sum(np.abs(d_eta3)**2)
         if denom < 1e-30:
             # Essentially no signal variation — can't estimate gain
@@ -209,11 +209,11 @@ class NPoints:
             self.Res['R']       = float('nan')
             self.Res['fnew']    = self.Res['fsig']
             return
-        gain_cplx = np.dot(d_eta2, np.conj(d_eta3)) / denom
+        gain_cplx = np.dot(d_eta1, np.conj(d_eta3)) / denom
         mgain = np.real(gain_cplx)   # gain is a real amplitude ratio
 
         self.Res['mgain1']  = mgain
-        self.Res['mratio1'] = mgain * eta3_mean - eta2_mean
+        self.Res['mratio1'] = mgain * eta3_mean - eta1_mean
         self.Res['R']    = np.real(1/(self.Res['Yref']*self.Res['mratio1']))
         self.Res['fnew'] = self.Res['fsig'] * -np.imag(self.Res['mratio1'])
 

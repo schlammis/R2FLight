@@ -52,9 +52,9 @@ class MainWindow(QMainWindow):
         self.quit = False
         self.loopfinished = False
         self._meas_running = False
-        # live eta2/eta3 preview accumulated during current ellipse, split by switch state
-        self._partial_eta2A = []
-        self._partial_eta2B = []
+        # live eta1/eta3 preview accumulated during current ellipse, split by switch state
+        self._partial_eta1A = []
+        self._partial_eta1B = []
         self._partial_eta3A = []
         self._partial_eta3B = []
         self.mutex = mutex
@@ -298,22 +298,22 @@ class MainWindow(QMainWindow):
         self.rSet = MySet
         self.progressBar.setValue(MySet.i + 1)
         if MySet.i == 0:
-            self._partial_eta2A = []
-            self._partial_eta2B = []
+            self._partial_eta1A = []
+            self._partial_eta1B = []
             self._partial_eta3A = []
             self._partial_eta3B = []
-        # live, per-point preview of eta2/eta3 (V2/V1, V3/V1) as points stream in,
+        # live, per-point preview of eta1/eta3 (V2/V1, V3/V1) as points stream in,
         # ahead of the final switch-averaged/ellipse-fit values -- split by
         # switch state (first Npts points are switch A, next Npts are switch B)
         Vc0 = MySet.Data[0].Vc
         if abs(Vc0) > 0:
-            eta2 = MySet.Data[1].Vc / Vc0
+            eta1 = MySet.Data[1].Vc / Vc0
             eta3 = MySet.Data[2].Vc / Vc0
             if MySet.i < self.Npts:
-                self._partial_eta2A.append(eta2)
+                self._partial_eta1A.append(eta1)
                 self._partial_eta3A.append(eta3)
             else:
-                self._partial_eta2B.append(eta2)
+                self._partial_eta1B.append(eta1)
                 self._partial_eta3B.append(eta3)
         self.replot()
 
@@ -492,14 +492,14 @@ class MainWindow(QMainWindow):
         self._clear_grid(self.scatterplots)
 
         # top row: raw channel voltages (phase-normalised to channel 1). bottom
-        # row: eta2/eta3 ratios -- always eta, whether from the completed
+        # row: eta1/eta3 ratios -- always eta, whether from the completed
         # per-switch-state fits below or the live per-point preview further down.
         self.scatterplots[0, 0].canvas.ax1.set_xlabel('Re(V2)')
         self.scatterplots[0, 0].canvas.ax1.set_ylabel('Im(V2)')
         self.scatterplots[0, 1].canvas.ax1.set_xlabel('Re(V3)')
         self.scatterplots[0, 1].canvas.ax1.set_ylabel('Im(V3)')
-        self.scatterplots[1, 0].canvas.ax1.set_xlabel('Re(eta2)')
-        self.scatterplots[1, 0].canvas.ax1.set_ylabel('Im(eta2)')
+        self.scatterplots[1, 0].canvas.ax1.set_xlabel('Re(eta1)')
+        self.scatterplots[1, 0].canvas.ax1.set_ylabel('Im(eta1)')
         self.scatterplots[1, 1].canvas.ax1.set_xlabel('Re(eta3)')
         self.scatterplots[1, 1].canvas.ax1.set_ylabel('Im(eta3)')
 
@@ -513,7 +513,7 @@ class MainWindow(QMainWindow):
             self._plot_switch_points(self.scatterplots[0, 1].canvas.ax1,
                                       self.rData.raw8A[:, 2], self.rData.raw8B[:, 2], 'c')
             self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
-                                      self.rData.eta2A, self.rData.eta2B, 'r')
+                                      self.rData.eta1A, self.rData.eta1B, 'r')
             self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1,
                                       self.rData.eta3A, self.rData.eta3B, 'b')
             if self.rData.RawElli[1] is not None:
@@ -528,18 +528,18 @@ class MainWindow(QMainWindow):
                 self.rData.EtaElliA[1].plot_elli(self.scatterplots[1, 1].canvas.ax1, ellipse_color='b')
             if self.rData.EtaElliB[1] is not None:
                 self.rData.EtaElliB[1].plot_elli(self.scatterplots[1, 1].canvas.ax1, ellipse_color='c')
-            np.savetxt(os.path.join(self.yyyymmdir, 'eta2.dat'),
-                       np.vstack((np.real(self.rData.eta2), np.imag(self.rData.eta2))).T)
+            np.savetxt(os.path.join(self.yyyymmdir, 'eta1.dat'),
+                       np.vstack((np.real(self.rData.eta1), np.imag(self.rData.eta1))).T)
             np.savetxt(os.path.join(self.yyyymmdir, 'eta3.dat'),
                        np.vstack((np.real(self.rData.eta3), np.imag(self.rData.eta3))).T)
             np.savetxt(os.path.join(self.yyyymmdir, 'V2.dat'),
                        np.vstack((np.real(self.rData.ave4[:, 1]), np.imag(self.rData.ave4[:, 1]))).T)
 
-        # partial (in-progress) eta2/eta3 preview — shown from point 0 of every
+        # partial (in-progress) eta1/eta3 preview — shown from point 0 of every
         # cycle; belongs on the eta row only, not the raw-voltage row above.
-        if self._partial_eta2A or self._partial_eta2B:
+        if self._partial_eta1A or self._partial_eta1B:
             self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
-                                      np.array(self._partial_eta2A), np.array(self._partial_eta2B), 'r')
+                                      np.array(self._partial_eta1A), np.array(self._partial_eta1B), 'r')
             self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1,
                                       np.array(self._partial_eta3A), np.array(self._partial_eta3B), 'b')
 
