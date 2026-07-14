@@ -56,12 +56,11 @@ class MainWindow(QMainWindow):
         self._partial_V3 = []
         self.mutex = mutex
         self.thread = QThread()
-        self.Npts = 8  # number of double points, i.e. the number of points in the circle
+        self.cfg = R2FConfig.CFG()
+        self.Npts = self.cfg.getintkey('NPTS')  # number of double points, i.e. the number of points in the circle
         self.fsig =  1591.511
         self.mytext = []
         self.mytextmaxlen = 1000
-
-        self.cfg = R2FConfig.CFG()
 
         dummy_config = CustomData.NPointsConfig(1000, 800000, Nhars=self.cfg.getintkey('NHARS'))
         self.rData   = CustomData.NPoints(dummy_config)
@@ -325,6 +324,8 @@ class MainWindow(QMainWindow):
             return   # hold here; _on_pause_toggled will call goagain when resumed
         if not self.quit:
             self._meas_running = True
+            self.Npts = self.cfg.getintkey('NPTS')
+            self.progressBar.setRange(0, self.Npts * 2)
             self.thread = QThread()
             try:
                 self.mydvm = Meas(self.mutex, self, self.Npts)
