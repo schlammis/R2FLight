@@ -10,6 +10,7 @@ import spectral3
 from Meas3 import Meas
 import CustomData
 import R2FConfig
+import R2FLightAux
 from TZA import TZA
 import mystat
 
@@ -566,20 +567,28 @@ class MainWindow(QMainWindow):
         self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1, eta1A, eta1B, 'r')
         self._plot_switch_points(self.scatterplots[1, 1].canvas.ax1, eta3A, eta3B, 'b')
 
-        # Fit overlays -- V2 ellipses (both switch states, top-left only, no
-        # ellipses anywhere else), and the fitted eta1 as solid symbols so the
-        # regression's goodness of fit is visible against the open (raw) eta1
-        # symbols above. Only shown while self.rData's fit actually matches
-        # the points currently on screen -- cleared as soon as a new cycle
-        # starts collecting, not left showing the previous cycle's stale fit.
+        # Fitted eta1 (solid symbols), so the regression's goodness of fit is
+        # visible against the open (raw) eta1 symbols above. Two complex
+        # points are the minimum needed to determine the fit, so this updates
+        # live from partial data per switch state as soon as each has that
+        # many -- it doesn't wait for the cycle (or even that switch state's
+        # own sweep) to finish.
+        mgain1A, mratio1A = R2FLightAux.fit_eta_regression(eta1A, eta3A)
+        eta1A_fit = mgain1A*eta3A - mratio1A if mgain1A is not None else np.array([])
+        mgain1B, mratio1B = R2FLightAux.fit_eta_regression(eta1B, eta3B)
+        eta1B_fit = mgain1B*eta3B - mratio1B if mgain1B is not None else np.array([])
+        self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1, eta1A_fit, eta1B_fit, 'r', filled=True)
+
+        # V2 ellipses (both switch states, top-left only, no ellipses
+        # anywhere else) need a full switch-state sweep, so those still come
+        # from the completed calc() result -- only shown while self.rData's
+        # fit actually matches the points currently on screen, cleared as
+        # soon as a new cycle starts collecting.
         if self.rData.Res['ts'] > 0 and self._fit_is_current:
             if self.rData.V2ElliA is not None:
                 self.rData.V2ElliA.plot_elli(self.scatterplots[0, 0].canvas.ax1, ellipse_color='m')
             if self.rData.V2ElliB is not None:
                 self.rData.V2ElliB.plot_elli(self.scatterplots[0, 0].canvas.ax1, ellipse_color='purple')
-            if self.rData.eta1A_fit is not None:
-                self._plot_switch_points(self.scatterplots[1, 0].canvas.ax1,
-                                          self.rData.eta1A_fit, self.rData.eta1B_fit, 'r', filled=True)
 
         if self.rData.Res['ts'] > 0:
             np.savetxt(os.path.join(self.yyyymmdir, 'eta1.dat'),

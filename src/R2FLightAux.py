@@ -171,6 +171,31 @@ def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1, n_coar
     return best_fsig, res_line.x
 
 
+def fit_eta_regression(eta1, eta3):
+    """Complex linear regression eta1 = mgain1*eta3 + const, returning
+    (mgain1, mratio1), or (None, None) if there aren't enough points yet.
+    The bridge relation omega*C*R = j*eta1 + j*(R/Z)*eta3 makes eta1 a
+    linear function of eta3 with complex slope mgain1 = -(R/Z) regardless
+    of the modulation trajectory's shape, so a direct regression is less
+    restrictive than fitting an ellipse to each and taking an axis-ratio
+    gain. Two complex points are the minimum needed to determine the two
+    complex unknowns (slope and offset)."""
+    eta1 = np.asarray(eta1)
+    eta3 = np.asarray(eta3)
+    if len(eta1) < 2:
+        return None, None
+    eta1_mean = np.mean(eta1)
+    eta3_mean = np.mean(eta3)
+    d_eta1 = eta1 - eta1_mean
+    d_eta3 = eta3 - eta3_mean
+    denom = np.sum(np.abs(d_eta3)**2)
+    if denom == 0:
+        return None, None
+    mgain1  = np.dot(d_eta1, np.conj(d_eta3)) / denom
+    mratio1 = mgain1*eta3_mean - eta1_mean
+    return mgain1, mratio1
+
+
 def build_fit_cache(fsamp, fsig, fline, n, Nhars, use_hann=True, chunk_periods=0):
     """Precompute fit matrices for repeated calls at the same frequency and sample count.
 

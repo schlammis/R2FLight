@@ -120,22 +120,6 @@ class NPoints:
             self._calc_no_modulation()
         self.setGoodFlag()
 
-    def _fit_eta_regression(self,eta1,eta3):
-        """Complex linear regression eta1 = mgain1*eta3 + const, returning
-        (mgain1, mratio1). The bridge relation omega*C*R = j*eta1 + j*(R/Z)*eta3
-        makes eta1 a linear function of eta3 with complex slope mgain1 = -(R/Z)
-        regardless of the modulation trajectory's shape, so a direct regression
-        is less restrictive than fitting an ellipse to each and taking an
-        axis-ratio gain."""
-        eta1_mean = np.mean(eta1)
-        eta3_mean = np.mean(eta3)
-        d_eta1 = eta1 - eta1_mean
-        d_eta3 = eta3 - eta3_mean
-        denom = np.sum(np.abs(d_eta3)**2)
-        mgain1  = np.dot(d_eta1, np.conj(d_eta3)) / denom
-        mratio1 = mgain1*eta3_mean - eta1_mean
-        return mgain1, mratio1
-
     def _calc_with_modulation(self):
         self.precalc()
         # V2 (raw channel 1) ellipse, fit per switch state -- scatter-tab
@@ -144,13 +128,11 @@ class NPoints:
         self.V2ElliB = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8B[:,1])
 
         # R/mratio1 comes from a linear regression of eta1 on eta3 for each
-        # switch state, then averaging the two results. eta1A_fit/eta1B_fit
-        # are the regression's own prediction of eta1 at the actual eta3
-        # points, for a visual goodness-of-fit check on the scatter tab.
-        mgain1A, mratio1A = self._fit_eta_regression(self.eta1A,self.eta3A)
-        mgain1B, mratio1B = self._fit_eta_regression(self.eta1B,self.eta3B)
-        self.eta1A_fit = mgain1A*self.eta3A - mratio1A
-        self.eta1B_fit = mgain1B*self.eta3B - mratio1B
+        # switch state, then averaging the two results. (The scatter tab
+        # computes its own fitted-eta1 overlay live from partial data, using
+        # this same regression -- see R2FLightAux.fit_eta_regression.)
+        mgain1A, mratio1A = R2FLightAux.fit_eta_regression(self.eta1A,self.eta3A)
+        mgain1B, mratio1B = R2FLightAux.fit_eta_regression(self.eta1B,self.eta3B)
 
         self.Res['mratio1A'] = mratio1A
         self.Res['mratio1B'] = mratio1B
@@ -169,11 +151,9 @@ class NPoints:
         recovers the gain ratio robustly even with as few as 4 points.
         """
         self.precalc()
-        # No ellipse/fit objects — set to None so callers can guard against it
+        # No ellipse objects — set to None so callers can guard against it
         self.V2ElliA = None
         self.V2ElliB = None
-        self.eta1A_fit = None
-        self.eta1B_fit = None
 
         eta1_mean = np.mean(self.eta1)
         eta3_mean = np.mean(self.eta3)
