@@ -6,6 +6,7 @@ import time
 
 import mplwidget
 import numpy as np
+from matplotlib.colors import to_rgb
 import spectral3
 from Meas3 import Meas
 import CustomData
@@ -468,16 +469,30 @@ class MainWindow(QMainWindow):
                 plots[i, j].canvas.draw()
 
     @staticmethod
+    def _shade_color(color, t):
+        """Interpolates from a light tint of `color` (t=0) to the full,
+        saturated color (t=1)."""
+        base = np.array(to_rgb(color))
+        alpha = 0.15 + 0.85 * t
+        return tuple((1 - alpha) * np.ones(3) + alpha * base)
+
+    @staticmethod
     def _plot_switch_points(ax, ptsA, ptsB, color, filled=False, markersize=9):
         """Circles for switch position 0 (straight), squares for switch
         position 1 (cross) -- used for every switch-differentiated scatter
         series. Open (filled=False) for raw data, solid (filled=True) for a
-        fitted/predicted overlay, so fit quality is visible at a glance."""
-        face = color if filled else 'none'
-        ax.plot(np.real(ptsA), np.imag(ptsA), marker='o', linestyle='None',
-                markerfacecolor=face, markeredgecolor=color, markersize=markersize)
-        ax.plot(np.real(ptsB), np.imag(ptsB), marker='s', linestyle='None',
-                markerfacecolor=face, markeredgecolor=color, markersize=markersize)
+        fitted/predicted overlay, so fit quality is visible at a glance.
+        Each series is shaded light-to-dark by sweep order (first point
+        lightest, last point full color), so the order is visible and a
+        fitted point can be matched to its raw point by matching shade."""
+        for pts, marker in ((ptsA, 'o'), (ptsB, 's')):
+            n = len(pts)
+            for i, p in enumerate(pts):
+                t = i / (n - 1) if n > 1 else 1.0
+                shade = MainWindow._shade_color(color, t)
+                face = shade if filled else 'none'
+                ax.plot(np.real(p), np.imag(p), marker=marker, linestyle='None',
+                        markerfacecolor=face, markeredgecolor=shade, markersize=markersize)
 
     def plotraw(self):
         if self.rSet.ts <= 0:
