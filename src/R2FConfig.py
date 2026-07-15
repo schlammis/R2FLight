@@ -8,7 +8,8 @@ class CFG:
             'NHARS': 9,
             'NPTS': 8,
             'AUTOFREQ': 1,
-            'MODOFF': 0}
+            'MODOFF': 0,
+            'FSIG': 1591.511}
 
     def __init__(self):
         self.fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R2FLight.ini')
@@ -30,6 +31,23 @@ class CFG:
         return int(CFG.std[k2])
 
     def setintkey(self,k2,val):
+        if CFG.k1 not in self.cp:
+            self.cp[CFG.k1]={}
+        self.cp[CFG.k1][k2]='{0}'.format(val)
+        self.save()
+        return
+
+    def getfloatkey(self,k2):
+        if CFG.k1 in self.cp:
+            if k2 in self.cp[CFG.k1]:
+                return float(self.cp[CFG.k1][k2])
+        if CFG.k1 not in self.cp:
+            self.cp[CFG.k1]={}
+        self.cp[CFG.k1][k2]='{0}'.format(CFG.std[k2])
+        self.save()
+        return float(CFG.std[k2])
+
+    def setfloatkey(self,k2,val):
         if CFG.k1 not in self.cp:
             self.cp[CFG.k1]={}
         self.cp[CFG.k1][k2]='{0}'.format(val)

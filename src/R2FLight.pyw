@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
         self.thread = QThread()
         self.cfg = R2FConfig.CFG()
         self.Npts = self.cfg.getintkey('NPTS')  # number of points in one full ellipse sweep (one switch position)
-        self.fsig =  1591.511
+        self.fsig = self.cfg.getfloatkey('FSIG')
         self.mytext = []
         self.mytextmaxlen = 1000
 
@@ -242,6 +242,7 @@ class MainWindow(QMainWindow):
 
     def _update_freq_label(self):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
+        self.cfg.setfloatkey('FSIG', self.fsig)
 
     def _build_config_widget(self):
         """Builds an editable form for the keys in R2FLight.ini."""
