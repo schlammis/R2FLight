@@ -244,13 +244,20 @@ class MainWindow(QMainWindow):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
         self.cfg.setfloatkey('FSIG', self.fsig)
 
+    @staticmethod
+    def _cfg_key_is_float(key):
+        return isinstance(R2FConfig.CFG.std[key], float)
+
+    def _cfg_get(self, key):
+        return self.cfg.getfloatkey(key) if self._cfg_key_is_float(key) else self.cfg.getintkey(key)
+
     def _build_config_widget(self):
         """Builds an editable form for the keys in R2FLight.ini."""
         widget = QWidget()
         form = QFormLayout()
         fields = {}
         for key in sorted(R2FConfig.CFG.std):
-            edit = QLineEdit(str(self.cfg.getintkey(key)))
+            edit = QLineEdit(str(self._cfg_get(key)))
             form.addRow(key, edit)
             fields[key] = edit
         save_btn = QPushButton('Save')
@@ -261,16 +268,21 @@ class MainWindow(QMainWindow):
 
     def _refresh_config_fields(self):
         for key, edit in self.cfgFields.items():
-            edit.setText(str(self.cfg.getintkey(key)))
+            edit.setText(str(self._cfg_get(key)))
 
     def _save_config(self):
         for key, edit in self.cfgFields.items():
+            is_float = self._cfg_key_is_float(key)
             try:
-                val = int(edit.text())
+                val = float(edit.text()) if is_float else int(edit.text())
             except ValueError:
-                self.myprint(f'Config: "{key}" must be an integer, not saved')
+                kind = 'a number' if is_float else 'an integer'
+                self.myprint(f'Config: "{key}" must be {kind}, not saved')
                 continue
-            self.cfg.setintkey(key, val)
+            if is_float:
+                self.cfg.setfloatkey(key, val)
+            else:
+                self.cfg.setintkey(key, val)
             edit.setText(str(val))
         self.myprint('Config saved to R2FLight.ini')
 
