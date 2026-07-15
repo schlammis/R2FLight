@@ -119,10 +119,19 @@ def fit_sine_cplx(y, fsamp, fsig, fline=60, Nhars=1, use_hann=True, chunk_period
     return complex_amp, fit_vals, errv, rss_total, chunk_amps
 
 
-def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1):
+def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1, n_coarse=21):
     """
     Estimates the signal frequency by minimizing the residual sum of squares
-    from fit_sine_cplx using Brent's bounded method (guaranteed convergence).
+    from fit_sine_cplx. A coarse grid scan over the search bracket locates
+    the right neighborhood first, then Brent's bounded method polishes
+    within one grid spacing of the coarse minimum for high precision.
+
+    The coarse step exists because scipy.optimize.minimize_scalar's bounded
+    Brent search assumes a roughly unimodal objective; with real noisy data
+    the RSS-vs-frequency curve can have local wiggles that trap a bare Brent
+    search in the wrong minimum, letting a small residual frequency error
+    slip through undetected.
+
     chunk_periods is intentionally left at 0 here for speed.
     """
     y = np.asarray(y, dtype=float)
@@ -137,9 +146,19 @@ def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1):
     fsig_min = fsig_guess - fbin
     fsig_max = fsig_guess + fbin
 
+    def rss_at(fsig):
+        return fit_sine_cplx(y, fsamp, fsig, fline_guess, Nhars=Nhars, use_hann=use_hann)[3]
+
+    grid = np.linspace(fsig_min, fsig_max, n_coarse)
+    rss_grid = np.array([rss_at(f) for f in grid])
+    i_best = np.argmin(rss_grid)
+    grid_spacing = grid[1] - grid[0]
+    polish_min = max(fsig_min, grid[i_best] - grid_spacing)
+    polish_max = min(fsig_max, grid[i_best] + grid_spacing)
+
     res_sig = scipy.optimize.minimize_scalar(
-        lambda fsig: fit_sine_cplx(y, fsamp, fsig, fline_guess, Nhars=Nhars, use_hann=use_hann)[3],
-        bounds=(fsig_min, fsig_max),
+        rss_at,
+        bounds=(polish_min, polish_max),
         method='bounded',
     )
     best_fsig = res_sig.x

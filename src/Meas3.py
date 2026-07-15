@@ -55,8 +55,11 @@ class Meas(QObject):
         self.sg1.write('OUTP2 ON')
         self.dvm.timeout=25000
         self.dvm.write('FORM3 REAL')
-        self.dvm.write('ACQ3:VOLT 3,DIFF,AC,TIME,(@101:102)')
-        self.dvm.write('ACQ3:VOLT 0.3,DIFF,AC,TIME,(@103:104)')
+        #self.dvm.write('ACQ3:VOLT 3,DIFF,AC,TIME,(@101:102)')
+        #self.dvm.write('ACQ3:VOLT 0.3,DIFF,AC,TIME,(@103:104)')
+        self.dvm.write('ACQ3:VOLT 18,SEND,DC,TIME,(@101:102)')
+        self.dvm.write('ACQ3:VOLT 0.3,SEND,DC,TIME,(@103:104)')
+
         sampcount = self.par.cfg.getintkey('SAMPCOUNT')
         self.dvm.write('SAMP3:RATE {0:8.2f},(@101:104)'.format(self.fsamp))
         self.dvm.write('SAMP3:COUN {0},(@101:104)'.format(sampcount))
