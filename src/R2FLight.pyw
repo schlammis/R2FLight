@@ -164,9 +164,9 @@ class MainWindow(QMainWindow):
         self.fstep.setPrefix('step: ')
 
         self.cbAutoFreq = QCheckBox("change frequency")
-        self.cbAutoFreq.setChecked(True)
+        self.cbAutoFreq.setChecked(bool(self.cfg.getintkey('AUTOFREQ')))
         self.cbModOff = QCheckBox("modulation off")
-        self.cbModOff.setChecked(False)
+        self.cbModOff.setChecked(bool(self.cfg.getintkey('MODOFF')))
 
         self.buPause = QPushButton("Pause")
         self.buPause.setCheckable(True)
@@ -236,6 +236,8 @@ class MainWindow(QMainWindow):
         self.buPause.toggled.connect(self._on_pause_toggled)
         self.bufp.clicked.connect(self.fp)
         self.bufm.clicked.connect(self.fm)
+        self.cbAutoFreq.toggled.connect(self._on_autofreq_toggled)
+        self.cbModOff.toggled.connect(self._on_modoff_toggled)
 
     def _update_freq_label(self):
         self.laf.setText(f'{self.fsig:8.5f} Hz')
@@ -355,6 +357,12 @@ class MainWindow(QMainWindow):
             # if goagain was held back while paused, restart now
             if not self._meas_running:
                 self.goagain()
+
+    def _on_autofreq_toggled(self, checked):
+        self.cfg.setintkey('AUTOFREQ', int(checked))
+
+    def _on_modoff_toggled(self, checked):
+        self.cfg.setintkey('MODOFF', int(checked))
 
     def goagain(self):
         self._meas_running = False

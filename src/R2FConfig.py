@@ -6,7 +6,9 @@ class CFG:
     std = { 'TZAGAIN': 4,
             'SAMPCOUNT': 300000,
             'NHARS': 9,
-            'NPTS': 8}
+            'NPTS': 8,
+            'AUTOFREQ': 1,
+            'MODOFF': 0}
 
     def __init__(self):
         self.fname = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'R2FLight.ini')
