@@ -1,3 +1,5 @@
 __pycache__/
 *_errlog.dat
 .vscode
+R2FNw_errlog_*
+.claude/

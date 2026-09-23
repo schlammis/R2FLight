@@ -174,12 +174,20 @@ def get_f(y, fsamp, fsig_guess, fline_guess=60.0, use_hann=True, Nhars=1, n_coar
 def fit_eta_regression(eta1, eta3):
     """Complex linear regression eta1 = mgain1*eta3 + const, returning
     (mgain1, mratio1), or (None, None) if there aren't enough points yet.
-    The bridge relation omega*C*R = j*eta1 + j*(R/Z)*eta3 makes eta1 a
-    linear function of eta3 with complex slope mgain1 = -(R/Z) regardless
-    of the modulation trajectory's shape, so a direct regression is less
-    restrictive than fitting an ellipse to each and taking an axis-ratio
-    gain. Two complex points are the minimum needed to determine the two
-    complex unknowns (slope and offset)."""
+
+    eta1 = V1'/V2' and eta3 = V3'/V2' (both normalized by the Z_REF-branch
+    voltage V2', per the bridge derivation). Solving the circuit equations
+    for V3' gives Yref*Z_DUT = -(Z_DUT/Z_FB)*eta3 - eta1 exactly, at every
+    instant -- where Yref = j*omega*C for a capacitive reference or 1/R for
+    a resistive one -- and Z_DUT/Z_FB and Yref*Z_DUT are both physical
+    constants that don't move with the modulation, so eta1 is an exact
+    linear function of eta3 with complex slope mgain1 = -(Z_DUT/Z_FB),
+    regardless of the modulation trajectory's shape. A direct regression is
+    therefore less restrictive than fitting an ellipse to each and taking
+    an axis-ratio gain. The fitted intercept mratio1 = mgain1*eta3_mean -
+    eta1_mean equals Yref*Z_DUT directly, so Z_DUT = mratio1/Yref.
+    Two complex points are the minimum needed to determine the two complex
+    unknowns (slope and offset)."""
     eta1 = np.asarray(eta1)
     eta3 = np.asarray(eta3)
     if len(eta1) < 2:

@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(/c/Users/schlammi/AppData/Local/miniforge3/envs/sci_env_310/python.exe -c ' *)",
-      "Bash(git commit -m ' *)"
-    ]
-  }
-}

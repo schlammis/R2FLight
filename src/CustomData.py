@@ -2,6 +2,40 @@ import R2FLightAux
 import numpy as np
 from dataclasses import dataclass
 
+# Known REF/DUT components, keyed by the label shown in the UI and stored in
+# the ini (REFPRESET/DUTPRESET) -- (impedance type 'R' or 'C', nominal value
+# in Ohms or Farads). Add entries here to make a new component available in
+# both the REF and DUT dropdowns.
+IMPEDANCE_PRESETS = {
+    '100 pF':  ('C', 100e-12),
+    '10 pF':   ('C', 10e-12),
+    '1 MOhm':  ('R', 1e6),
+    '100 kOhm': ('R', 100e3),
+}
+
+
+def nominal_impedance(kind, value, fsig):
+    """Complex impedance of a nominal R or C component at fsig -- 'kind' is
+    'R' (value in Ohms) or 'C' (value in Farads), matching IMPEDANCE_PRESETS."""
+    if kind == 'C':
+        return 1.0 / (1j * 2*np.pi*fsig*value)
+    return complex(value)
+
+
+def snap_ratio_prefactor(ratio):
+    """Snap a nominal complex impedance ratio (Z_DUT/Z_REF) to the nearest
+    'clean' design value: sign * 10**n sitting on whichever axis (real or
+    imaginary) the ratio is actually on -- e.g. 10, -1, 0.1j. Same-type
+    (R:R or C:C) comparisons land on the real axis; mixed-type (R:C or C:R)
+    comparisons land on the imaginary axis, since Z_C is purely imaginary
+    and Z_R is purely real. This is what the ratio should be by design; the
+    caller reports how far the actual measurement deviates from it."""
+    mag = 10 ** round(np.log10(abs(ratio)))
+    if abs(ratio.real) >= abs(ratio.imag):
+        return complex(mag * np.sign(ratio.real), 0.0)
+    return complex(0.0, mag * np.sign(ratio.imag))
+
+
 class SampleData:
     def __init__(self,fsig,fsamp,data,Nhars=2):
         self.data  = np.array(data)
@@ -51,7 +85,8 @@ class NPointsConfig:
     g2: float = 1.0
     ratio: float = 10.0
     N: int = 8
-    Cref: float = 100e-12
+    ref_type: str = 'C'   # 'C' (reference is a capacitor) or 'R' (a resistor)
+    ref_value: float = 100e-12   # Farads if ref_type=='C', Ohms if ref_type=='R'
     modulation: bool = True
     
 
@@ -69,7 +104,11 @@ class NPoints:
             'Nhars': self.cfg.Nhars,
             'gain1': self.cfg.g1,
             'gain2': self.cfg.g2,
-            'Yref' : 2*np.pi*self.cfg.fsig*self.cfg.Cref*1j,
+            # reference admittance: j*omega*C for a capacitive reference, or
+            # 1/R for a resistive one -- Z_DUT = mratio1/Yref either way,
+            # since Yref is only ever used as a plain complex divisor
+            'Yref' : (2*np.pi*self.cfg.fsig*self.cfg.ref_value*1j if self.cfg.ref_type == 'C'
+                      else 1.0/self.cfg.ref_value),
             'ts': min(self.ats)
         }        
         self.Res['ts']= min(self.ats)      
@@ -86,7 +125,10 @@ class NPoints:
         self.raw8 = np.zeros((self.N,4),dtype=complex)
         self.ctrl = np.zeros((self.N,2),dtype=complex)
         for i in range(self.N):
-            phi = np.angle(self.Data[i].Data[0].Vc)
+            # V2 (channel 1, index 1) is held constant, so it's the stable
+            # phase reference -- deroting by V1's own (modulated) phase
+            # instead would trivially collapse V1's column to purely real.
+            phi = np.angle(self.Data[i].Data[1].Vc)
             cf = np.exp(-1j*phi)
             for j in range(4):
                 self.raw8[i,j] =  self.Data[i].Data[j].Vc*cf
@@ -99,19 +141,21 @@ class NPoints:
         self.raw8A, self.raw8B = self.raw8[:half,:], self.raw8[half:,:]
         self.ctrlA, self.ctrlB = self.ctrl[:half,:], self.ctrl[half:,:]
 
-        # Switch-averaged view -- kept only for the eta*.dat/V2.dat logging.
+        # Switch-averaged view -- kept only for the eta*.dat/V1.dat logging.
         # The R calculation and the scatter-tab display both use the
         # per-switch-state values below instead.
         self.ave4  = 0.5*(self.raw8A+self.raw8B)
         self.ctrla = 0.5*(self.ctrlA+self.ctrlB)
-        self.eta1 = self.ave4[:,1]/self.ave4[:,0]
-        self.eta3 = self.ave4[:,2]/self.ave4[:,0]
+        # eta1 = V1'/V2', eta3 = V3'/V2' (normalized by the Z_REF-branch
+        # channel, per the bridge derivation -- NOT by V1/ch1).
+        self.eta1 = self.ave4[:,0]/self.ave4[:,1]
+        self.eta3 = self.ave4[:,2]/self.ave4[:,1]
 
         # Per-switch-state ratios, for the independent regression fits.
-        self.eta1A = self.raw8A[:,1]/self.raw8A[:,0]
-        self.eta3A = self.raw8A[:,2]/self.raw8A[:,0]
-        self.eta1B = self.raw8B[:,1]/self.raw8B[:,0]
-        self.eta3B = self.raw8B[:,2]/self.raw8B[:,0]
+        self.eta1A = self.raw8A[:,0]/self.raw8A[:,1]
+        self.eta3A = self.raw8A[:,2]/self.raw8A[:,1]
+        self.eta1B = self.raw8B[:,0]/self.raw8B[:,1]
+        self.eta3B = self.raw8B[:,2]/self.raw8B[:,1]
 
     def calc(self):
         if self.cfg.modulation:
@@ -120,17 +164,31 @@ class NPoints:
             self._calc_no_modulation()
         self.setGoodFlag()
 
+    def _set_impedance_results(self, Z):
+        """DUT modeled as R parallel with a parasitic C_p:
+        Z = R/(1+j*omega*tau), tau = R*C_p. Inverting: Y = 1/Z = 1/R + j*omega*C_p,
+        so R = 1/Re(Y), C_p = Im(Y)/omega, tau = R*C_p = Im(Y)/(omega*Re(Y))."""
+        self.Res['Z'] = Z
+        self.Res['X'] = np.imag(Z)
+        Y = 1/Z
+        self.Res['Y'] = Y
+        w = 2*np.pi*self.Res['fsig']
+        self.Res['R']   = 1/np.real(Y)
+        self.Res['Cp']  = np.imag(Y)/w
+        self.Res['tau'] = self.Res['Cp']*self.Res['R']
+
     def _calc_with_modulation(self):
         self.precalc()
-        # V2 (raw channel 1) ellipse, fit per switch state -- scatter-tab
+        # V1 (raw channel 0) ellipse, fit per switch state -- scatter-tab
         # display only, purely a visual check on the raw trajectory shape.
-        self.V2ElliA = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8A[:,1])
-        self.V2ElliB = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8B[:,1])
+        # V1 carries the modulation now; V2 is held constant.
+        self.V1ElliA = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8A[:,0])
+        self.V1ElliB = R2FLightAux.ComplexEllipse.fit_from_cmplx_points(self.raw8B[:,0])
 
-        # R/mratio1 comes from a linear regression of eta1 on eta3 for each
-        # switch state, then averaging the two results. (The scatter tab
-        # computes its own fitted-eta1 overlay live from partial data, using
-        # this same regression -- see R2FLightAux.fit_eta_regression.)
+        # Z_DUT/mratio1 comes from a linear regression of eta1 on eta3 for
+        # each switch state, then averaging the two results. (The scatter
+        # tab computes its own fitted-eta1 overlay live from partial data,
+        # using this same regression -- see R2FLightAux.fit_eta_regression.)
         mgain1A, mratio1A = R2FLightAux.fit_eta_regression(self.eta1A,self.eta3A)
         mgain1B, mratio1B = R2FLightAux.fit_eta_regression(self.eta1B,self.eta3B)
 
@@ -138,22 +196,23 @@ class NPoints:
         self.Res['mratio1B'] = mratio1B
         self.Res['mgain1']  = 0.5*(mgain1A + mgain1B)
         self.Res['mratio1'] = 0.5*(mratio1A + mratio1B)
-        self.Res['R']    = np.real(1/(self.Res['Yref']*self.Res['mratio1']))
-        self.Res['fnew'] = self.Res['fsig'] * -np.imag(self.Res['mratio1'])
+        # mratio1 = Yref*Z_DUT directly (see derivation), so Z_DUT is just
+        # mratio1/Yref -- and it's genuinely complex now, not just R.
+        self._set_impedance_results(self.Res['mratio1'] / self.Res['Yref'])
 
     def _calc_no_modulation(self):
-        """Estimate gain and R from noise correlation when V2 modulation is off.
+        """Estimate gain and R from noise correlation when V1 modulation is off.
 
         With no intentional modulation the N/2 phasors (eta1, eta3) cluster
         around a single point.  Their fluctuations are dominated by noise that
-        is largely shared (common 1/V1 denominator noise), so the OLS regression
+        is largely shared (common 1/V2 denominator noise), so the OLS regression
             d_eta1 = mgain * d_eta3  +  independent noise
         recovers the gain ratio robustly even with as few as 4 points.
         """
         self.precalc()
         # No ellipse objects — set to None so callers can guard against it
-        self.V2ElliA = None
-        self.V2ElliB = None
+        self.V1ElliA = None
+        self.V1ElliB = None
 
         eta1_mean = np.mean(self.eta1)
         eta3_mean = np.mean(self.eta3)
@@ -167,16 +226,14 @@ class NPoints:
             self.goodData = False
             self.Res['mgain1']  = 0.0
             self.Res['mratio1'] = 0.0
-            self.Res['R']       = float('nan')
-            self.Res['fnew']    = self.Res['fsig']
+            self._set_impedance_results(complex('nan'))
             return
         gain_cplx = np.dot(d_eta1, np.conj(d_eta3)) / denom
         mgain = np.real(gain_cplx)   # gain is a real amplitude ratio
 
         self.Res['mgain1']  = mgain
         self.Res['mratio1'] = mgain * eta3_mean - eta1_mean
-        self.Res['R']    = np.real(1/(self.Res['Yref']*self.Res['mratio1']))
-        self.Res['fnew'] = self.Res['fsig'] * -np.imag(self.Res['mratio1'])
+        self._set_impedance_results(self.Res['mratio1'] / self.Res['Yref'])
 
     def setGoodFlag(self):
         self.goodData=True
