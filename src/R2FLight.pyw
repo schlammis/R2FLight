@@ -612,6 +612,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._meas_running = False
             self.myprint(f'Instrument error: {e}')
+            for l in traceback.format_exc().rstrip().splitlines():
+                self.myprint('  ' + l)
             self.statusBar.showMessage('Instrument error — retrying in 10 s', 10000)
             QTimer.singleShot(10000, self.goagain)
             return

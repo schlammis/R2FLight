@@ -76,18 +76,58 @@ class Meas(QObject):
         always constructed on the GUI thread, before moveToThread())."""
         result = {}
 
+        def _open_with_retry(rm, name, max_attempts=3, delay=1.0):
+            """Retry a VisaIOError on open() a few times -- covers a
+            transient USB enumeration timing glitch. Won't help if the
+            instrument's own USB/remote-interface state is genuinely
+            wedged (that needs a physical power cycle of the instrument,
+            not just the PC), but costs nothing to try first."""
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return rm.open_resource(name)
+                except pyvisa.errors.VisaIOError as e:
+                    if attempt == max_attempts:
+                        raise
+                    self.par.myprint(f'  open_resource({name}) failed ({e}), retrying '
+                                      f'({attempt}/{max_attempts})...')
+                    time.sleep(delay)
+
         def _connect():
             try:
                 rm = pyvisa.ResourceManager()
                 sg1_pattern = "^USB.*:MY62.*"
                 dvm_pattern = "^USB.*:MY59.*"
-                sg1_name = ''
-                dvm_name = ''
+                sg1_candidates = []
+                dvm_candidates = []
                 for i in rm.list_resources():
                     if re.search(sg1_pattern, i):
-                        sg1_name = i
+                        sg1_candidates.append(i)
                     elif re.search(dvm_pattern, i):
-                        dvm_name = i
+                        dvm_candidates.append(i)
+
+                # the same physical instrument can enumerate under more than
+                # one USB interface number (observed on this hardware: the
+                # DVM shows up as both USB0::...MY59012404... and
+                # USB1::...MY59012404..., same serial) -- picking whichever
+                # duplicate happened to come last in list_resources() was
+                # nondeterministic and could land on an interface that can't
+                # act as bus controller, raising VI_ERROR_NCIC on *TRG.
+                # De-duplicate and always prefer the lowest USB bus number.
+                def _usb_bus_num(resource_str):
+                    m = re.match(r'^USB(\d+)', resource_str)
+                    return int(m.group(1)) if m else 999
+
+                sg1_unique = sorted(dict.fromkeys(sg1_candidates), key=_usb_bus_num)
+                dvm_unique = sorted(dict.fromkeys(dvm_candidates), key=_usb_bus_num)
+                if len(sg1_unique) > 1:
+                    self.par.myprint(f'WARNING: signal generator matched multiple VISA resources '
+                                      f'{sg1_unique} -- using {sg1_unique[0]}')
+                if len(dvm_unique) > 1:
+                    self.par.myprint(f'WARNING: DVM matched multiple VISA resources '
+                                      f'{dvm_unique} -- using {dvm_unique[0]}')
+                sg1_name = sg1_unique[0] if sg1_unique else ''
+                dvm_name = dvm_unique[0] if dvm_unique else ''
+
                 # open_resource('') on a not-found instrument can also hang
                 # on some backends -- fail fast instead
                 if not sg1_name:
@@ -95,9 +135,23 @@ class Meas(QObject):
                 if not dvm_name:
                     raise RuntimeError(f'DVM not found (no VISA resource matching {dvm_pattern!r})')
                 result['rm']  = rm
-                result['sg1'] = rm.open_resource(sg1_name)
-                result['dvm'] = rm.open_resource(dvm_name)
+                self.par.myprint(f'  opening sg1: {sg1_name}')
+                result['sg1'] = _open_with_retry(rm, sg1_name)
+                self.par.myprint(f'  opening dvm: {dvm_name}')
+                result['dvm'] = _open_with_retry(rm, dvm_name)
+                self.par.myprint('  both instruments opened')
             except Exception as e:
+                # don't leave a half-open session behind (e.g. sg1 opened
+                # fine but dvm failed) -- an unclosed VISA session can
+                # itself cause the next connection attempt to fail with
+                # a controller-arbitration error (VI_ERROR_NCIC) or similar
+                for key in ('sg1', 'dvm', 'rm'):
+                    obj = result.get(key)
+                    if obj is not None:
+                        try:
+                            obj.close()
+                        except Exception:
+                            pass
                 result['error'] = e
 
         t = threading.Thread(target=_connect, daemon=True)
@@ -110,28 +164,37 @@ class Meas(QObject):
             raise result['error']
         self.rm, self.sg1, self.dvm = result['rm'], result['sg1'], result['dvm']
 
+    def _scpi_write(self, instrument, name, cmd):
+        """Write with a step marker logged first -- so if this call raises,
+        the log shows exactly which SCPI command it was on, not just that
+        'something' in precmd() failed (temporary diagnostic aid for
+        tracking down VI_ERROR_NCIC; safe to strip the myprint calls back
+        out once the failing command is identified)."""
+        self.par.myprint(f'  SCPI -> {name}: {cmd}')
+        instrument.write(cmd)
+
     def precmd(self):
-        self.sg1.write('UNIT:ANGL DEG')
-        self.sg1.write('VOLT:UNIT VPP')
-        self.sg1.write('VOLT:OFFS 0')
-        self.sg1.write('SOUR1:FUNC SIN')
-        self.sg1.write('SOUR2:FUNC SIN')
-        self.sg1.write('OUTP1 ON')
-        self.sg1.write('OUTP2 ON')
+        self._scpi_write(self.sg1, 'sg1', 'UNIT:ANGL DEG')
+        self._scpi_write(self.sg1, 'sg1', 'VOLT:UNIT VPP')
+        self._scpi_write(self.sg1, 'sg1', 'VOLT:OFFS 0')
+        self._scpi_write(self.sg1, 'sg1', 'SOUR1:FUNC SIN')
+        self._scpi_write(self.sg1, 'sg1', 'SOUR2:FUNC SIN')
+        self._scpi_write(self.sg1, 'sg1', 'OUTP1 ON')
+        self._scpi_write(self.sg1, 'sg1', 'OUTP2 ON')
         self.dvm.timeout=25000
-        self.dvm.write('FORM3 REAL')
+        self._scpi_write(self.dvm, 'dvm', 'FORM3 REAL')
         #self.dvm.write('ACQ3:VOLT 3,DIFF,AC,TIME,(@101:102)')
         #self.dvm.write('ACQ3:VOLT 0.3,DIFF,AC,TIME,(@103:104)')
-        self.dvm.write('ACQ3:VOLT 18,SEND,DC,TIME,(@101:102)')
-        self.dvm.write('ACQ3:VOLT 0.3,SEND,DC,TIME,(@103:104)')
+        self._scpi_write(self.dvm, 'dvm', 'ACQ3:VOLT 18,SEND,DC,TIME,(@101:102)')
+        self._scpi_write(self.dvm, 'dvm', 'ACQ3:VOLT 0.3,SEND,DC,TIME,(@103:104)')
 
         self.sampcount = self.par.cfg.getintkey('SAMPCOUNT')
         self.settle_time = self.par.cfg.getfloatkey('SETTLE')
         self.save_raw = bool(self.par.cfg.getintkey('SAVERAW'))
-        self.dvm.write('SAMP3:RATE {0:8.2f},(@101:104)'.format(self.fsamp))
-        self.dvm.write('SAMP3:COUN {0},(@101:104)'.format(self.sampcount))
-        self.dvm.write('INP3:COUP AC,(@101:104)')
-        self.dvm.write('TRIG3:SOUR BUS,(@101:104)')
+        self._scpi_write(self.dvm, 'dvm', 'SAMP3:RATE {0:8.2f},(@101:104)'.format(self.fsamp))
+        self._scpi_write(self.dvm, 'dvm', 'SAMP3:COUN {0},(@101:104)'.format(self.sampcount))
+        self._scpi_write(self.dvm, 'dvm', 'INP3:COUP DC,(@101:104)')
+        self._scpi_write(self.dvm, 'dvm', 'TRIG3:SOUR BUS,(@101:104)')
 
     def write1dbg(self,ostr,debug=False):
         self.sg1.write(ostr)
@@ -153,11 +216,13 @@ class Meas(QObject):
         if self.co==0:
             self.par.myprint("V1= {0:8.3f}  V2={1:8.3f} dV1={2:8.3f}  f={3:8.5f} kHz".format(self.V1c,self.V2c,self.dV1,self.fsig/1000))
         if self.co<self.NDpts:
-            self.dvm.write('ROUT:OPEN (@211,248)')
-            self.dvm.write('ROUT:CLOS (@218,241)') # 8->1 1->4
+            #self.dvm.write('ROUT:OPEN (@211,248)')
+            #self.dvm.write('ROUT:CLOS (@218,241)') # 8->1 1->4
+            pass
         else:
-            self.dvm.write('ROUT:OPEN (@218,241)')
-            self.dvm.write('ROUT:CLOS (@211,248)') # 1->1 8->4
+            #self.dvm.write('ROUT:OPEN (@218,241)')
+            #self.dvm.write('ROUT:CLOS (@211,248)') # 1->1 8->4
+            pass
         if self.modulation:
             # V2 (the C_REF branch) is held perfectly constant; V1 (the
             # Z_DUT branch) traces the small ellipse that gives eta1/eta3
@@ -281,7 +346,31 @@ class Meas(QObject):
                 self.dataReady.emit(self.rawN)
             except Exception:
                 self._log_point_failure(where='calc() after full cycle')
+        self._close_instruments()
         self.finished.emit()
+
+    def _close_instruments(self):
+        """Explicitly release the VISA sessions at the end of every cycle.
+        goagain() constructs a brand-new Meas() (hence brand-new VISA
+        sessions to the same two instruments) every single cycle; relying
+        on Python garbage collection to close the previous ones isn't
+        prompt or guaranteed, especially with PyQt object lifetimes
+        involved (moveToThread/deleteLater). Sessions piling up over a long
+        run risks exactly the kind of controller-arbitration error
+        (VI_ERROR_NCIC) seen in practice."""
+        for attr in ('sg1', 'dvm'):
+            res = getattr(self, attr, None)
+            if res is not None:
+                try:
+                    res.close()
+                except Exception:
+                    pass
+        rm = getattr(self, 'rm', None)
+        if rm is not None:
+            try:
+                rm.close()
+            except Exception:
+                pass
 
     def _log_point_failure(self, where=None):
         tb = traceback.format_exc()
